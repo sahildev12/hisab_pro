@@ -1,0 +1,280 @@
+Create a modern, fast, mobile-friendly calculation app called **HisabPro**.
+
+### App Purpose
+
+HisabPro is a simple calculation tool for entering multiple rows containing an amount and a bracket/passing number, automatically calculating the totals and final amount, and generating a ready-to-copy WhatsApp-style message.
+
+The most important requirement is **100% accurate arithmetic**. Every calculation must be performed programmatically, never manually or approximately.
+
+### Branding
+
+App name: **HisabPro**
+
+Tagline: **Fast • Accurate • Always Yours**
+
+Use a professional blue/white interface with subtle gradients, rounded cards, clean typography, and a trustworthy financial/calculator aesthetic.
+
+Logo concept:
+
+* A modern calculator icon
+* A percentage (%) symbol integrated into the calculator
+* Blue/white color scheme
+* Simple enough to work as an app icon/favicon
+* Text version: **HisabPro**
+* "Hisab" in white/dark blue and "Pro" in bright blue
+
+### Main Screen
+
+At the top:
+
+**HisabPro**
+
+Then provide a calculation title/input, for example:
+
+**Modi bhai 96% 4**
+
+The user should be able to change this title.
+
+Create a dynamic table with these columns:
+
+| # | Name | Amount | Bracket |
+| - | ---- | ------ | ------- |
+
+Example rows:
+
+Sb. | 8490 | 30
+Gw. | 5880 | 35
+Db. | 7500 | 81
+Dm. | 7570 | 50
+Sg. | 7337 | 211
+Ag. | 11732 | 140
+Fb. | 16253 | 65
+Al. | 10270 | 100
+Gb. | 11500 | 82.5
+Dw. | 10350 | 35
+Gl. | 15700 | 190
+Ds. | 8195 | 40
+
+Allow the user to:
+
+* Add unlimited rows
+* Delete rows
+* Edit any row
+* Enter decimal values such as 82.5
+* Automatically number rows
+* Clear all rows
+* Calculate
+
+### Calculation Logic
+
+For every row, the user enters:
+
+**Amount** = the main amount.
+
+**Bracket** = the number used for the passing calculation.
+
+Calculate:
+
+**TOTAL AMOUNT = SUM(all Amount values)**
+
+**TOTAL BRACKET = SUM(all Bracket values)**
+
+Then calculate:
+
+**PASSING AMOUNT = TOTAL BRACKET × 96**
+
+Then:
+
+**LENE AAJ = TOTAL AMOUNT − PASSING AMOUNT**
+
+Important:
+
+* Do NOT subtract the bracket from the amount.
+* Do NOT apply 96% to the total amount.
+* The 96 multiplier is applied specifically to the TOTAL BRACKET.
+* Preserve decimal values accurately.
+* Recalculate everything whenever data changes.
+* Show the calculation breakdown so the user can verify it.
+
+### Example
+
+For the provided data:
+
+TOTAL AMOUNT = 120,777
+
+TOTAL BRACKET = 1,059.5
+
+PASSING = 1,059.5 × 96 = 101,712
+
+LENE AAJ = 120,777 − 101,712 = **19,065**
+
+The app must show **₹19,065** as the final result.
+
+### Results Screen
+
+After pressing Calculate, show a clean result card:
+
+**Modi bhai 96% 4**
+
+**Total Amount**
+₹120,777
+
+**Total Bracket**
+1,059.5
+
+**96% of Bracket**
+₹101,712
+
+**Lene Aaj**
+
+### ₹19,065
+
+Make the final "Lene Aaj" result visually prominent.
+
+Also show:
+
+Calculation Details
+
+Total Amount = 120,777
+Total Bracket = 1,059.5
+Passing = 1,059.5 × 96 = 101,712
+Lene Aaj = 120,777 − 101,712 = 19,065
+
+### Copy Message Button
+
+At the bottom of the result screen add a large button:
+
+**📋 COPY MESSAGE**
+
+When pressed, copy the following formatted text to the clipboard:
+
+Modi bhai 96% 4
+
+Sb. 8490 (30)
+Gw. 5880 (35)
+Db. 7500 (81)
+Dm. 7570 (50)
+Sg. 7337 (211)
+Ag. 11732 (140)
+Fb. 16253 (65)
+Al. 10270 (100)
+Gb. 11500 (82.5)
+Dw. 10350 (35)
+Gl. 15700 (190)
+Ds. 8195 (40)
+
+TOTAL 120777
+
+PASSING 1059.5 × 96 = 101712
+
+LENE AAJ = 19065
+
+After copying, change the button temporarily to:
+
+**✓ COPIED**
+
+and show a small "Message copied!" confirmation.
+
+### Important Validation
+
+Before calculating:
+
+* Amount must be a valid number.
+* Bracket must be a valid number.
+* Empty rows should either be ignored or clearly flagged.
+* Support commas in entered amounts, e.g. 12,077.
+* Support decimals.
+* Never produce NaN, undefined, Infinity, or incorrect totals.
+* Display a clear validation error if an invalid number is entered.
+
+### UI/UX
+
+Make the app extremely simple because it will be used repeatedly.
+
+Main actions:
+
+1. Add Row
+2. Calculate
+3. Clear All
+
+Result actions:
+
+1. Back/Edit
+2. Copy Message
+
+Use:
+
+* Responsive mobile-first design
+* Large touch-friendly input fields
+* Sticky Calculate button on mobile
+* Clean table/card layout
+* Currency formatting with Indian comma notation
+* Smooth but minimal animations
+* No unnecessary screens
+* No login required
+* No unnecessary complexity
+
+### Data Persistence
+
+Save the current calculation locally so accidentally refreshing/reopening the app does not immediately lose the data.
+
+Add an optional:
+**New Calculation**
+button to start fresh.
+
+### Calculation Architecture
+
+Keep calculation logic separate from the UI.
+
+Create a dedicated calculation function similar to:
+
+calculate(rows) {
+totalAmount = sum(rows.amount)
+totalBracket = sum(rows.bracket)
+passing = totalBracket * 96
+leneAaj = totalAmount - passing
+
+```
+return {
+    totalAmount,
+    totalBracket,
+    passing,
+    leneAaj
+}
+```
+
+}
+
+Use proper decimal-safe arithmetic wherever necessary.
+
+### Future-ready Design
+
+Structure the application so that percentage settings can later be changed.
+
+For example:
+
+96% / 4
+95% / 5
+90% / 10
+80% / 20
+
+For this first version, however, default to:
+
+**96 × TOTAL BRACKET**
+
+Do not change the calculation logic without an explicit setting.
+
+### Final Quality Requirement
+
+Test the application using the exact example data provided above.
+
+The expected result MUST be:
+
+TOTAL = 120,777
+BRACKET = 1,059.5
+PASSING = 101,712
+LENE AAJ = **19,065**
+
+If the displayed result differs, fix the calculation before considering the app complete.
+
+Make the finished application polished, production-quality, responsive, and easy to use on both phone and desktop.

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../constants/fixed_names.dart';
 import '../core/validate.dart';
 import '../models/row_data.dart';
 import '../theme/app_theme.dart';
@@ -11,6 +10,7 @@ class RowTable extends StatelessWidget {
   const RowTable({
     super.key,
     required this.rows,
+    required this.entryNames,
     required this.onRowChanged,
     required this.onDeleteRow,
     required this.onAddRow,
@@ -18,6 +18,7 @@ class RowTable extends StatelessWidget {
   });
 
   final List<RowData> rows;
+  final List<String> entryNames;
   final void Function(int index, RowData row) onRowChanged;
   final ValueChanged<int> onDeleteRow;
   final VoidCallback onAddRow;
@@ -28,7 +29,7 @@ class RowTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: surfaceDecoration(),
+      decoration: surfaceDecoration(context),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
@@ -69,6 +70,7 @@ class RowTable extends StatelessWidget {
                       key: ValueKey(rows[index].id),
                       index: index,
                       row: rows[index],
+                      entryNames: entryNames,
                       hasError: errorRowIndex == index,
                       onChanged: (updated) => onRowChanged(index, updated),
                       onDelete: () => onDeleteRow(index),
@@ -150,6 +152,7 @@ class _RowEntry extends StatefulWidget {
     super.key,
     required this.index,
     required this.row,
+    required this.entryNames,
     required this.hasError,
     required this.onChanged,
     required this.onDelete,
@@ -157,6 +160,7 @@ class _RowEntry extends StatefulWidget {
 
   final int index;
   final RowData row;
+  final List<String> entryNames;
   final bool hasError;
   final ValueChanged<RowData> onChanged;
   final VoidCallback onDelete;
@@ -169,7 +173,10 @@ class _RowEntryState extends State<_RowEntry> {
   late final TextEditingController _amountController;
   late final TextEditingController _bracketController;
 
-  static final _numberFormatter = FilteringTextInputFormatter.allow(
+  static final _amountFormatter = FilteringTextInputFormatter.allow(
+    RegExp(r'[0-9,]'),
+  );
+  static final _bracketFormatter = FilteringTextInputFormatter.allow(
     RegExp(r'[0-9.,]'),
   );
 
@@ -233,7 +240,7 @@ class _RowEntryState extends State<_RowEntry> {
   @override
   Widget build(BuildContext context) {
     final selectedName =
-        widget.row.name.isNotEmpty && fixedNames.contains(widget.row.name)
+        widget.row.name.isNotEmpty && widget.entryNames.contains(widget.row.name)
             ? widget.row.name
             : null;
 
@@ -254,7 +261,7 @@ class _RowEntryState extends State<_RowEntry> {
               isDense: true,
               decoration: _cellDeco(),
               hint: Text('—', style: GoogleFonts.inter(fontSize: 13)),
-              items: fixedNames
+              items: widget.entryNames
                   .map((n) => DropdownMenuItem(value: n, child: Text(n)))
                   .toList(),
               onChanged: (v) {
@@ -268,8 +275,8 @@ class _RowEntryState extends State<_RowEntry> {
             child: TextField(
               controller: _amountController,
               decoration: _cellDeco(),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [_numberFormatter],
+              keyboardType: TextInputType.number,
+              inputFormatters: [_amountFormatter],
               onChanged: (_) => _emit(),
               style: GoogleFonts.inter(fontSize: 13),
             ),
@@ -281,7 +288,7 @@ class _RowEntryState extends State<_RowEntry> {
               controller: _bracketController,
               decoration: _cellDeco(),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [_numberFormatter],
+              inputFormatters: [_bracketFormatter],
               onChanged: (_) => _emit(),
               style: GoogleFonts.inter(fontSize: 13),
             ),

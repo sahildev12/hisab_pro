@@ -22,32 +22,49 @@ class ActionButtons extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: OutlinedButton.icon(
+              child: _secondaryButton(
                 onPressed: onClearAll,
-                icon: const Icon(Icons.delete_outline, size: 18),
-                label: const Text('Clear All'),
+                icon: Icons.delete_outline,
+                label: 'Clear All',
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
-              child: OutlinedButton.icon(
+              child: _secondaryButton(
                 onPressed: onNewCalculation,
-                icon: const Icon(Icons.note_add_outlined, size: 18),
-                label: const Text('New Calculation'),
+                icon: Icons.note_add_outlined,
+                label: 'New Calc.',
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          height: AppSpacing.buttonHeight,
-          child: ElevatedButton.icon(
-            onPressed: onCalculate,
-            icon: const Icon(Icons.calculate_outlined, size: 22),
-            label: const Text('Calculate'),
-          ),
+        ElevatedButton.icon(
+          onPressed: onCalculate,
+          style: fullWidthPrimaryButtonStyle(),
+          icon: const Icon(Icons.calculate_outlined, size: 20),
+          label: const Text('Calculate'),
         ),
       ],
+    );
+  }
+
+  Widget _secondaryButton({
+    required VoidCallback onPressed,
+    required IconData icon,
+    required String label,
+  }) {
+    return SizedBox(
+      height: 44,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 17),
+        label: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
     );
   }
 }

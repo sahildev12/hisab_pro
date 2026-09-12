@@ -1,5 +1,4 @@
 import '../models/calculation_result.dart';
-import '../models/settlement_type.dart';
 import '../models/row_data.dart';
 import 'format.dart';
 import 'parse_number.dart';
@@ -9,11 +8,16 @@ String buildCopyMessage({
   required String title,
   required List<RowData> rows,
   required CalculationResult result,
+  String persistentHeader = '',
 }) {
   final buffer = StringBuffer();
+  final trimmedHeader = persistentHeader.trim();
   final trimmedTitle = title.trim().isEmpty ? 'Calculation' : title.trim();
-  final settlementLabel =
-      result.settlementType == SettlementType.lene ? 'LENE AAJ' : 'DENE AAJ';
+
+  if (trimmedHeader.isNotEmpty) {
+    buffer.writeln(trimmedHeader);
+    buffer.writeln();
+  }
 
   buffer.writeln(trimmedTitle);
   buffer.writeln();
@@ -25,12 +29,14 @@ String buildCopyMessage({
   }
 
   buffer.writeln();
-  buffer.writeln('TOTAL ${formatPlainNumber(result.totalAmount)}');
   buffer.writeln(
-    'PASSING ${formatPlainNumber(result.totalBracket)} × ${result.multiplier} = ${formatPlainNumber(result.passing)}',
+    'TOTAL ${formatPlainNumber(result.totalAmount)} - ${formatPlainNumber(result.amountDeduction)} = ${formatPlainNumber(result.netTotalAmount)}',
   );
   buffer.writeln(
-    '$settlementLabel = ${formatPlainNumber(result.finalAmount)}',
+    'PASSING ${formatPlainNumber(result.totalBracket)} × ${formatPlainNumber(result.passingRate)} = ${formatMoney(result.passing, showCurrency: false)}',
+  );
+  buffer.writeln(
+    '${formatMoney(result.netTotalAmount, showCurrency: false)} - ${formatMoney(result.passing, showCurrency: false)} = ${formatMoney(result.displayAmount, showCurrency: false)} ${result.resultType.displayLabel.toLowerCase()}.',
   );
 
   return buffer.toString().trimRight();

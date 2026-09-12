@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../core/share_message.dart';
 import '../theme/app_theme.dart';
 
 class CopyButton extends StatefulWidget {
@@ -14,22 +14,22 @@ class CopyButton extends StatefulWidget {
 }
 
 class _CopyButtonState extends State<CopyButton> {
-  bool _copied = false;
+  bool _shared = false;
 
-  Future<void> _copy() async {
-    await Clipboard.setData(ClipboardData(text: widget.message));
-    setState(() => _copied = true);
+  Future<void> _share() async {
+    await shareCalculationMessage(widget.message);
+    setState(() => _shared = true);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Message copied!'),
+          content: Text('Copied and ready to share!'),
           duration: Duration(milliseconds: 1800),
           behavior: SnackBarBehavior.floating,
         ),
       );
     }
     await Future<void>.delayed(const Duration(milliseconds: 1800));
-    if (mounted) setState(() => _copied = false);
+    if (mounted) setState(() => _shared = false);
   }
 
   @override
@@ -37,17 +37,16 @@ class _CopyButtonState extends State<CopyButton> {
     return SizedBox(
       height: AppSpacing.buttonHeight,
       child: ElevatedButton.icon(
-        onPressed: _copy,
-        icon: Icon(_copied ? Icons.check : Icons.copy_all_outlined),
-        label: Text(
-          _copied ? '✓ Copied' : '📋 Copy Message',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16),
+        onPressed: _share,
+        style: fullWidthPrimaryButtonStyle().copyWith(
+          backgroundColor: WidgetStatePropertyAll(
+            _shared ? AppColors.success : AppColors.primary,
+          ),
         ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor:
-              _copied ? AppColors.success : AppColors.success,
-          foregroundColor: Colors.white,
-          elevation: 0,
+        icon: Icon(_shared ? Icons.check : Icons.share_outlined),
+        label: Text(
+          _shared ? 'Shared' : 'Copy & Share Message',
+          style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15),
         ),
       ),
     );

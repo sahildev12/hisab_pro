@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../core/format.dart';
 import '../models/calculation_result.dart';
-import '../models/settlement_type.dart';
 import '../theme/app_theme.dart';
 
 class QuickSummaryStrip extends StatelessWidget {
@@ -13,98 +12,97 @@ class QuickSummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final leneLabel =
-        result.settlementType == SettlementType.lene ? 'Lene' : 'Dene';
-
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: surfaceDecoration(),
+      decoration: surfaceDecoration(context),
       child: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: _cell(
-                  'Total',
-                  formatIndianNumber(result.totalAmount, showCurrency: true),
-                  AppColors.primaryBlue,
-                ),
-              ),
-              Container(width: 1, height: 40, color: AppColors.border),
-              Expanded(
-                child: _cell(
-                  'Bracket',
-                  formatIndianNumber(result.totalBracket),
-                  AppColors.primaryText,
-                ),
-              ),
-            ],
+          _row(
+            'Total Amount',
+            formatMoney(result.totalAmount, showCurrency: true),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _cell(
-                  'Passing',
-                  formatIndianNumber(result.passing, showCurrency: true),
-                  AppColors.warning,
+          const SizedBox(height: 8),
+          _row(
+            '${formatPlainNumber(result.amountDeductionRate)}% Amount Deduction',
+            formatMoney(result.amountDeduction, showCurrency: true),
+          ),
+          const SizedBox(height: 8),
+          _row(
+            'Net Total',
+            formatMoney(result.netTotalAmount, showCurrency: true),
+            bold: true,
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1, color: AppColors.border),
+          ),
+          _row('Total Bracket', formatBracket(result.totalBracket)),
+          const SizedBox(height: 8),
+          _row(
+            'Passing @ ${formatPlainNumber(result.passingRate)}',
+            formatPassingAmount(result.passing, showCurrency: true),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1, color: AppColors.border),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.successLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    result.resultType.displayLabel,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.success,
+                    ),
+                  ),
                 ),
-              ),
-              Container(width: 1, height: 40, color: AppColors.border),
-              Expanded(
-                child: _cell(
-                  leneLabel,
-                  formatIndianNumber(result.finalAmount, showCurrency: true),
-                  AppColors.success,
-                  highlight: true,
+                Text(
+                  formatMoney(result.displayAmount, showCurrency: true),
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.success,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _cell(
-    String label,
-    String value,
-    Color color, {
-    bool highlight = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: highlight
-          ? BoxDecoration(
-              color: AppColors.successLight,
-              borderRadius: BorderRadius.circular(10),
-            )
-          : null,
-      child: Column(
-        children: [
-          Text(
-            label.toUpperCase(),
+  Widget _row(String label, String value, {bool bold = false}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
             style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
               color: AppColors.secondaryText,
-              letterSpacing: 0.5,
             ),
           ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: GoogleFonts.inter(
-                fontSize: highlight ? 18 : 16,
-                fontWeight: FontWeight.w700,
-                color: color,
-              ),
-            ),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.inter(
+            fontSize: bold ? 16 : 15,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+            color: AppColors.primaryText,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

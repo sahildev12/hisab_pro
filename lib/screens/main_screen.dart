@@ -1,48 +1,75 @@
 import 'dart:async';
 
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../core/calculate.dart';
+import '../core/money.dart' show suggestedAmountDeduction;
 import '../core/storage.dart';
 import '../core/validate.dart';
 import '../models/calculation_result.dart';
+import '../models/history_entry.dart';
 import '../models/row_data.dart';
-import '../models/settlement_type.dart';
 import '../theme/app_theme.dart';
 import '../widgets/action_buttons.dart';
+import '../widgets/calculation_rates_control.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/header.dart';
 import '../widgets/live_preview.dart';
+import '../widgets/persistent_header_input.dart';
 import '../widgets/quick_summary_strip.dart';
 import '../widgets/row_table.dart';
-import '../widgets/settlement_row.dart';
 import '../widgets/title_input.dart';
+import 'history_screen.dart';
+import 'settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({
     super.key,
     required this.storage,
     required this.initialTitle,
+    required this.initialPersistentHeader,
     required this.initialRows,
-    required this.initialSettlementType,
-    required this.initialBracketRate,
+    required this.initialPassingRate,
+    required this.initialAmountDeductionRate,
+    required this.settings,
+    required this.entryNames,
+    required this.onDraftChanged,
+    required this.onPersistentHeaderChanged,
     required this.onCalculate,
     required this.onNewCalculation,
+    required this.onSettingsChanged,
+    required this.onOpenHistoryEntry,
+    this.onDeleteHistoryEntry,
   });
 
   final StorageService storage;
   final String initialTitle;
+  final String initialPersistentHeader;
   final List<RowData> initialRows;
-  final SettlementType initialSettlementType;
-  final int initialBracketRate;
+  final Decimal initialPassingRate;
+  final Decimal initialAmountDeductionRate;
+  final AppSettings settings;
+  final List<String> entryNames;
+  final void Function({
+    required String title,
+    required List<RowData> rows,
+    required Decimal passingRate,
+    required Decimal amountDeductionRate,
+  }) onDraftChanged;
+  final ValueChanged<String> onPersistentHeaderChanged;
   final void Function(
     String title,
     List<RowData> rows,
     CalculationResult result,
-    SettlementType settlementType,
-    int bracketRate,
+    Decimal passingRate,
+    Decimal amountDeductionRate,
   ) onCalculate;
-  final VoidCallback onNewCalculation;
+  final Future<void> Function() onNewCalculation;
+  final ValueChanged<AppSettings> onSettingsChanged;
+  final ValueChanged<HistoryEntry> onOpenHistoryEntry;
+  final ValueChanged<String>? onDeleteHistoryEntry;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -50,13 +77,17 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   late final TextEditingController _titleController;
+  late final TextEditingController _persistentHeaderController;
   late List<RowData> _rows;
-  late SettlementType _settlementType;
-  late int _bracketRate;
+  late Decimal _passingRate;
+  late Decimal _amountDeductionRate;
+  bool _deductionLinkedToPassing = true;
   String? _errorMessage;
   int? _errorRowIndex;
   Timer? _saveTimer;
+  Timer? _headerSaveTimer;
   CalculationResult? _preview;
+  String _saveStatus = '';
 
   bool get _hasRowData => _rows.any((row) => !isRowEmpty(row));
 
@@ -64,16 +95,23 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.initialTitle);
+    _persistentHeaderController = TextEditingController(
+      text: widget.initialPersistentHeader,
+    );
     _rows = List<RowData>.from(widget.initialRows);
-    _settlementType = widget.initialSettlementType;
-    _bracketRate = widget.initialBracketRate;
+    _passingRate = widget.initialPassingRate;
+    _amountDeductionRate = widget.initialAmountDeductionRate;
+    _deductionLinkedToPassing = _amountDeductionRate ==
+        suggestedAmountDeduction(_passingRate);
     _updatePreview();
   }
 
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _headerSaveTimer?.cancel();
     _titleController.dispose();
+    _persistentHeaderController.dispose();
     super.dispose();
   }
 
@@ -81,65 +119,77 @@ class _MainScreenState extends State<MainScreen> {
       RowData.empty(id: DateTime.now().microsecondsSinceEpoch.toString());
 
   void _scheduleSave() {
+    setState(() => _saveStatus = 'Saving…');
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 300), _persist);
+    _saveTimer = Timer(const Duration(milliseconds: 400), _persist);
+  }
+
+  void _scheduleHeaderSave() {
+    _headerSaveTimer?.cancel();
+    _headerSaveTimer = Timer(const Duration(milliseconds: 400), () {
+      widget.onPersistentHeaderChanged(_persistentHeaderController.text);
+    });
   }
 
   Future<void> _persist() async {
-    await widget.storage.save(
-      SavedState(
+    await widget.storage.saveDraft(
+      DraftState(
         title: _titleController.text,
         rows: _rows,
+        passingRate: _passingRate,
+        amountDeductionRate: _amountDeductionRate,
         lastView: 'main',
-        settlementType: _settlementType,
-        bracketRate: _bracketRate,
       ),
     );
+    widget.onDraftChanged(
+      title: _titleController.text,
+      rows: _rows,
+      passingRate: _passingRate,
+      amountDeductionRate: _amountDeductionRate,
+    );
+    if (mounted) setState(() => _saveStatus = 'Saved');
   }
 
   void _updatePreview() {
     if (!_hasRowData) {
-      setState(() => _preview = null);
+      if (_preview != null) setState(() => _preview = null);
       return;
     }
-    final validation = validateRows(_rows);
+    final validation = validateRows(_rows, allowedNames: widget.entryNames);
     if (!validation.isValid) {
-      setState(() => _preview = null);
+      if (_preview != null) setState(() => _preview = null);
       return;
     }
     try {
-      final result = calculate(
+      final result = calculateSettlement(
         _rows,
-        multiplier: _bracketRate,
-        settlementType: _settlementType,
+        passingRate: _passingRate,
+        amountDeductionRate: _amountDeductionRate,
       );
-      setState(() => _preview = result);
+      if (mounted) setState(() => _preview = result);
     } catch (_) {
-      setState(() => _preview = null);
+      if (_preview != null) setState(() => _preview = null);
     }
   }
 
   void _onTitleChanged(String _) {
-    setState(() {
-      _errorMessage = null;
-      _errorRowIndex = null;
-    });
-    _updatePreview();
+    if (_errorMessage != null || _errorRowIndex != null) {
+      setState(() {
+        _errorMessage = null;
+        _errorRowIndex = null;
+      });
+    }
     _scheduleSave();
   }
 
-  void _onSettlementChanged(SettlementType type) {
-    setState(() {
-      _settlementType = type;
-      _errorMessage = null;
-    });
-    _updatePreview();
-    _scheduleSave();
+  void _onPersistentHeaderChanged(String _) {
+    _scheduleHeaderSave();
   }
 
-  void _onBracketRateChanged(int rate) {
+  void _onRatesChanged(CalculationRates rates) {
     setState(() {
-      _bracketRate = rate;
+      _passingRate = rates.passingRate;
+      _amountDeductionRate = rates.amountDeductionRate;
       _errorMessage = null;
     });
     _updatePreview();
@@ -190,29 +240,34 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _newCalculation() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Start new calculation?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+    final hasData = _titleController.text.trim().isNotEmpty || _hasRowData;
+    if (hasData) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Start New Calculation?'),
+          content: const Text(
+            'Your current draft will be saved to History.',
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Start New'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    await widget.storage.clear();
-    widget.onNewCalculation();
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Start New'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await widget.onNewCalculation();
   }
 
   void _calculate() {
-    final validation = validateRows(_rows);
+    final validation = validateRows(_rows, allowedNames: widget.entryNames);
     if (!validation.isValid) {
       setState(() {
         _errorMessage = validation.errorMessage;
@@ -221,17 +276,17 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
     try {
-      final result = calculate(
+      final result = calculateSettlement(
         _rows,
-        multiplier: _bracketRate,
-        settlementType: _settlementType,
+        passingRate: _passingRate,
+        amountDeductionRate: _amountDeductionRate,
       );
       widget.onCalculate(
         _titleController.text,
         _rows,
         result,
-        _settlementType,
-        _bracketRate,
+        _passingRate,
+        _amountDeductionRate,
       );
     } catch (error) {
       setState(() {
@@ -251,10 +306,37 @@ class _MainScreenState extends State<MainScreen> {
     _scheduleSave();
   }
 
+  void _openSettings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SettingsScreen(
+          storage: widget.storage,
+          settings: widget.settings,
+          onSettingsChanged: widget.onSettingsChanged,
+          onOpenHistoryEntry: widget.onOpenHistoryEntry,
+          onDeleteHistoryEntry: widget.onDeleteHistoryEntry,
+        ),
+      ),
+    );
+  }
+
+  void _openHistory() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HistoryScreen(
+          storage: widget.storage,
+          onEditEntry: widget.onOpenHistoryEntry,
+          onDeleteEntry: widget.onDeleteHistoryEntry,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(
@@ -270,14 +352,26 @@ class _MainScreenState extends State<MainScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Header(
-                    onSettingsTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Settings coming soon'),
-                          behavior: SnackBarBehavior.floating,
+                    onSettingsTap: _openSettings,
+                    onHistoryTap: _openHistory,
+                  ),
+                  if (_saveStatus.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _saveStatus,
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppColors.slate,
                         ),
-                      );
-                    },
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.sectionGap),
+                  PersistentHeaderInput(
+                    controller: _persistentHeaderController,
+                    onChanged: _onPersistentHeaderChanged,
                   ),
                   const SizedBox(height: AppSpacing.sectionGap),
                   TitleInput(
@@ -285,11 +379,16 @@ class _MainScreenState extends State<MainScreen> {
                     onChanged: _onTitleChanged,
                   ),
                   const SizedBox(height: AppSpacing.sectionGap),
-                  SettlementRow(
-                    value: _settlementType,
-                    bracketRate: _bracketRate,
-                    onSettlementChanged: _onSettlementChanged,
-                    onRateChanged: _onBracketRateChanged,
+                  CalculationRatesControl(
+                    rates: CalculationRates(
+                      passingRate: _passingRate,
+                      amountDeductionRate: _amountDeductionRate,
+                    ),
+                    deductionLinkedToPassing: _deductionLinkedToPassing,
+                    onDeductionLinkChanged: (linked) {
+                      setState(() => _deductionLinkedToPassing = linked);
+                    },
+                    onRatesChanged: _onRatesChanged,
                   ),
                   const SizedBox(height: AppSpacing.sectionGap),
                   if (_rows.isEmpty)
@@ -297,6 +396,7 @@ class _MainScreenState extends State<MainScreen> {
                   else ...[
                     RowTable(
                       rows: _rows,
+                      entryNames: widget.entryNames,
                       onRowChanged: _onRowChanged,
                       onDeleteRow: _deleteRow,
                       onAddRow: _addRow,

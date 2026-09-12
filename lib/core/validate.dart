@@ -1,4 +1,5 @@
-import '../constants/fixed_names.dart';
+import 'package:decimal/decimal.dart';
+
 import '../models/row_data.dart';
 import 'parse_number.dart';
 
@@ -27,7 +28,16 @@ bool isValidNumber(String value) {
   return tryParseDecimal(value) != null;
 }
 
-ValidationResult validateRows(List<RowData> rows) {
+bool isWholeNumberAmount(String value) {
+  final parsed = tryParseDecimal(value);
+  if (parsed == null) return false;
+  return parsed % Decimal.one == Decimal.zero;
+}
+
+ValidationResult validateRows(
+  List<RowData> rows, {
+  required List<String> allowedNames,
+}) {
   var hasAnyData = false;
 
   for (var i = 0; i < rows.length; i++) {
@@ -52,7 +62,15 @@ ValidationResult validateRows(List<RowData> rows) {
     if (!isValidNumber(row.amount)) {
       return ValidationResult(
         isValid: false,
-        errorMessage: 'Row ${i + 1}: Invalid amount',
+        errorMessage: 'Row ${i + 1}: Enter a valid amount.',
+        rowIndex: i,
+      );
+    }
+
+    if (!isWholeNumberAmount(row.amount)) {
+      return ValidationResult(
+        isValid: false,
+        errorMessage: 'Row ${i + 1}: Amount must be a whole number.',
         rowIndex: i,
       );
     }
@@ -60,12 +78,12 @@ ValidationResult validateRows(List<RowData> rows) {
     if (!isValidNumber(row.bracket)) {
       return ValidationResult(
         isValid: false,
-        errorMessage: 'Row ${i + 1}: Invalid bracket',
+        errorMessage: 'Row ${i + 1}: Enter a valid bracket.',
         rowIndex: i,
       );
     }
 
-    if (!hasName || !isFixedName(row.name)) {
+    if (!hasName || !allowedNames.contains(row.name.trim())) {
       return ValidationResult(
         isValid: false,
         errorMessage: 'Row ${i + 1}: Select a name',

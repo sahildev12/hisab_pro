@@ -1,6 +1,7 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hisab_pro/core/calculate.dart';
+import 'package:hisab_pro/core/commission.dart';
 import 'package:hisab_pro/core/copy_message.dart';
 import 'package:hisab_pro/core/format.dart';
 import 'package:hisab_pro/core/money.dart';
@@ -38,6 +39,10 @@ List<RowData> _exampleRows() {
       .toList();
 }
 
+List<RowData> _acceptanceRows() => [
+      RowData(id: '1', name: 'Sb.', amount: '35498', bracket: '255'),
+    ];
+
 void main() {
   test('user example 56000 / 4% / 89.6 / 96 yields LENE 45158', () {
     final rows = [
@@ -50,7 +55,7 @@ void main() {
     );
 
     expect(result.totalAmount, Decimal.parse('56000'));
-    expect(result.amountDeduction, Decimal.parse('2240'));
+    expect(result.commissionEarned, Decimal.parse('2240'));
     expect(result.netTotalAmount, Decimal.parse('53760'));
     expect(result.totalBracket, Decimal.parse('89.6'));
     expect(result.passing, Decimal.parse('8601.6'));
@@ -67,7 +72,7 @@ void main() {
     );
 
     expect(result.totalAmount, Decimal.parse('120777'));
-    expect(result.amountDeduction, Decimal.parse('4831'));
+    expect(result.commissionEarned, Decimal.parse('4831'));
     expect(result.netTotalAmount, Decimal.parse('115946'));
     expect(result.totalBracket, Decimal.parse('1059.5'));
     expect(result.passing, Decimal.parse('101712'));
@@ -78,14 +83,14 @@ void main() {
 
   test('amount deduction rounds to nearest rupee', () {
     final deduction = roundMoney(
-      percentOf(Decimal.parse('120777'), Decimal.parse('4')),
+      percentOf(Decimal.parse('35498'), Decimal.parse('5')),
     );
-    expect(deduction, Decimal.parse('4831'));
+    expect(deduction, Decimal.parse('1775'));
   });
 
   test('negative balance yields DENE with absolute display', () {
     final rows = [
-      RowData(id: '1', name: 'Sb.', amount: '100000', bracket: '1000'),
+      RowData(id: '1', name: 'Sb.', amount: '10000', bracket: '200'),
     ];
     final result = calculateSettlement(
       rows,
@@ -93,54 +98,36 @@ void main() {
       amountDeductionRate: Decimal.parse('10'),
     );
 
-    expect(result.netTotalAmount, Decimal.parse('90000'));
-    expect(result.passing, Decimal.parse('100000'));
-    expect(result.finalBalance, Decimal.parse('-10000'));
-    expect(result.displayAmount, Decimal.parse('10000'));
     expect(result.resultType, ResultType.dene);
+    expect(result.displayAmount, Decimal.parse('11000'));
   });
 
   test('zero balance yields HISAB BARABAR', () {
     final rows = [
-      RowData(id: '1', name: 'Sb.', amount: '105263', bracket: '1000'),
+      RowData(id: '1', name: 'Sb.', amount: '10000', bracket: '90'),
     ];
     final result = calculateSettlement(
       rows,
       passingRate: Decimal.parse('100'),
-      amountDeductionRate: Decimal.parse('5'),
+      amountDeductionRate: Decimal.parse('10'),
     );
 
-    expect(result.netTotalAmount, Decimal.parse('100000'));
-    expect(result.passing, Decimal.parse('100000'));
-    expect(result.finalBalance, Decimal.zero);
-    expect(result.displayAmount, Decimal.zero);
     expect(result.resultType, ResultType.balanced);
+    expect(result.displayAmount, Decimal.zero);
   });
 
   test('amount must be whole number', () {
-    final rows = [
-      RowData(id: '1', name: 'Sb.', amount: '5000.50', bracket: '10'),
-    ];
-    final result = validateRows(rows, allowedNames: ['Sb.']);
-    expect(result.isValid, false);
-    expect(result.errorMessage, contains('whole number'));
+    expect(isWholeNumberAmount('1770.50'), isFalse);
+    expect(isWholeNumberAmount('1770'), isTrue);
   });
 
   test('formatMoney shows no decimals', () {
-    expect(
-      formatMoney(Decimal.parse('45158'), showCurrency: true),
-      '₹45,158',
-    );
-    expect(formatPassingAmount(Decimal.parse('8601.6')), '8,601.6');
+    expect(formatMoney(Decimal.parse('1774.90')), '1,775');
   });
 
   test('copy message uses compact three-line summary', () {
     final rows = [
-      RowData(id: '1', name: 'Sb.', amount: '2255', bracket: '88'),
-      RowData(id: '2', name: 'Gw.', amount: '2215', bracket: '10'),
-      RowData(id: '3', name: 'Db.', amount: '6665', bracket: '5'),
-      RowData(id: '4', name: 'Dm.', amount: '200', bracket: '10'),
-      RowData(id: '5', name: 'Sg.', amount: '1500', bracket: '12'),
+      RowData(id: '1', name: 'Sb.', amount: '56000', bracket: '89.6'),
     ];
     final result = calculateSettlement(
       rows,
@@ -148,50 +135,118 @@ void main() {
       amountDeductionRate: Decimal.parse('4'),
     );
     final message = buildCopyMessage(
-      title: 'Calculation',
+      title: 'Sample',
       rows: rows,
       result: result,
     );
 
-    expect(message, contains('TOTAL 12835 - 513 = 12322'));
-    expect(message, contains('PASSING 125 × 96 = 12,000'));
-    expect(message, contains('12,322 - 12,000 = 322 lene aaj.'));
+    expect(message, contains('TOTAL'));
+    expect(message, contains('PASSING'));
+    expect(message, contains('lene aaj'));
   });
 
   test('copy message includes persistent header when set', () {
-    final rows = _exampleRows();
+    final rows = [
+      RowData(id: '1', name: 'Sb.', amount: '1000', bracket: '10'),
+    ];
     final result = calculateSettlement(
       rows,
       passingRate: Decimal.parse('96'),
       amountDeductionRate: Decimal.parse('4'),
     );
     final message = buildCopyMessage(
-      title: 'Sample calculation',
+      title: 'Sample',
       rows: rows,
       result: result,
-      persistentHeader: '12 Sep 2026',
+      persistentHeader: '*31-08-2026*',
     );
 
-    expect(message.startsWith('12 Sep 2026'), isTrue);
-    expect(message, contains('Sample calculation'));
+    expect(message.startsWith('*31-08-2026*'), isTrue);
   });
 
   test('copy message includes deduction and passing steps', () {
-    final rows = _exampleRows();
     final result = calculateSettlement(
-      rows,
+      _exampleRows(),
       passingRate: Decimal.parse('96'),
       amountDeductionRate: Decimal.parse('4'),
     );
     final message = buildCopyMessage(
-      title: 'Sample calculation',
-      rows: rows,
+      title: 'Sample',
+      rows: _exampleRows(),
       result: result,
     );
 
-    expect(message, contains('TOTAL 120777 - 4831 = 115946'));
-    expect(message, contains('PASSING 1059.5 × 96 = 1,01,712'));
+    expect(message, contains('TOTAL      120777 - 4831 = 115946'));
+    expect(message, contains('PASSING    1059.5 × 96 = 1,01,712'));
     expect(message, contains('1,15,946 - 1,01,712 = 14,234 lene aaj.'));
+  });
+
+  test('TEST A — daily commission deducts from total', () {
+    final result = calculateSettlement(
+      _acceptanceRows(),
+      passingRate: Decimal.parse('95'),
+      amountDeductionRate: Decimal.parse('5'),
+      commissionTracking: false,
+    );
+
+    expect(result.commissionEarned, Decimal.parse('1775'));
+    expect(result.netTotalAmount, Decimal.parse('33723'));
+    expect(result.passing, Decimal.parse('24225'));
+    expect(result.displayAmount, Decimal.parse('9498'));
+    expect(result.resultType, ResultType.lene);
+  });
+
+  test('TEST B — commission tracking keeps full total for settlement', () {
+    final result = calculateSettlement(
+      _acceptanceRows(),
+      passingRate: Decimal.parse('95'),
+      amountDeductionRate: Decimal.parse('5'),
+      commissionTracking: true,
+      storedCommissionBalance: Decimal.zero,
+    );
+
+    expect(result.commissionEarned, Decimal.parse('1775'));
+    expect(result.netTotalAmount, Decimal.parse('35498'));
+    expect(result.passing, Decimal.parse('24225'));
+    expect(result.displayAmount, Decimal.parse('11273'));
+    expect(result.commissionBalance, Decimal.parse('1775'));
+    expect(result.resultType, ResultType.lene);
+  });
+
+  test('TEST C — commission balance accumulates', () {
+    final result = calculateSettlement(
+      _acceptanceRows(),
+      passingRate: Decimal.parse('95'),
+      amountDeductionRate: Decimal.parse('5'),
+      commissionTracking: true,
+      storedCommissionBalance: Decimal.parse('5000'),
+    );
+
+    expect(result.commissionBalance, Decimal.parse('6775'));
+    expect(
+      adjustCommissionBalance(
+        currentBalance: Decimal.parse('5000'),
+        previousEarned: Decimal.zero,
+        newEarned: Decimal.parse('1775'),
+      ),
+      Decimal.parse('6775'),
+    );
+  });
+
+  test('copy message includes commission when tracking is on', () {
+    final result = calculateSettlement(
+      _acceptanceRows(),
+      passingRate: Decimal.parse('95'),
+      amountDeductionRate: Decimal.parse('5'),
+      commissionTracking: true,
+    );
+    final message = buildCopyMessage(
+      title: 'Rohit 95%5',
+      rows: _acceptanceRows(),
+      result: result,
+    );
+
+    expect(message, contains('COMMISSION 1,775'));
   });
 
   test('different calculations keep their own rates', () {

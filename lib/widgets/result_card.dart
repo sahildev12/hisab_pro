@@ -5,16 +5,19 @@ import '../core/format.dart'
     show formatBracket, formatMoney, formatPlainNumber, formatRate;
 import '../models/calculation_result.dart';
 import '../theme/app_theme.dart';
+import 'commission_balance_card.dart';
 
 class ResultCard extends StatefulWidget {
   const ResultCard({
     super.key,
     required this.title,
     required this.result,
+    this.onClearCommission,
   });
 
   final String title;
   final CalculationResult result;
+  final VoidCallback? onClearCommission;
 
   @override
   State<ResultCard> createState() => _ResultCardState();
@@ -41,40 +44,6 @@ class _ResultCardState extends State<ResultCard> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 20),
-        Container(
-          decoration: surfaceDecoration(context),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              _breakdownRow(
-                'Total Amount',
-                formatMoney(result.totalAmount, showCurrency: true),
-              ),
-              const SizedBox(height: 10),
-              _breakdownRow(
-                'Amount Deduction @ ${formatRate(result.amountDeductionRate)}',
-                formatMoney(result.amountDeduction, showCurrency: true),
-              ),
-              const SizedBox(height: 10),
-              _breakdownRow(
-                'Net Total Amount',
-                formatMoney(result.netTotalAmount, showCurrency: true),
-                bold: true,
-              ),
-              const SizedBox(height: 10),
-              _breakdownRow(
-                'Total Bracket',
-                formatBracket(result.totalBracket),
-              ),
-              const SizedBox(height: 10),
-              _breakdownRow(
-                'Passing @ ${formatPlainNumber(result.passingRate)}',
-                formatMoney(result.passing, showCurrency: true),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
           decoration: BoxDecoration(
@@ -107,6 +76,49 @@ class _ResultCardState extends State<ResultCard> {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: surfaceDecoration(context),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              _breakdownRow(
+                'Total Amount',
+                formatMoney(result.totalAmount, showCurrency: true),
+              ),
+              const SizedBox(height: 10),
+              if (!result.commissionTracking) ...[
+                _breakdownRow(
+                  'Commission @ ${formatRate(result.amountDeductionRate)}',
+                  formatMoney(result.commissionEarned, showCurrency: true),
+                ),
+                const SizedBox(height: 10),
+                _breakdownRow(
+                  'Net Total Amount',
+                  formatMoney(result.netTotalAmount, showCurrency: true),
+                  bold: true,
+                ),
+              ],
+              const SizedBox(height: 10),
+              _breakdownRow(
+                'Total Bracket',
+                formatBracket(result.totalBracket),
+              ),
+              const SizedBox(height: 10),
+              _breakdownRow(
+                'Passing @ ${formatPlainNumber(result.passingRate)}',
+                formatMoney(result.passing, showCurrency: true),
+              ),
+            ],
+          ),
+        ),
+        if (result.showsCommissionInfo) ...[
+          const SizedBox(height: 16),
+          CommissionBalanceCard(
+            result: result,
+            onClear: widget.onClearCommission,
+          ),
+        ],
         const SizedBox(height: 12),
         Container(
           decoration: surfaceDecoration(context),
@@ -166,10 +178,14 @@ class _ResultCardState extends State<ResultCard> {
   }
 
   String _detailsText(CalculationResult result) {
-    return '''
-${formatPlainNumber(result.totalAmount)} × ${formatPlainNumber(result.amountDeductionRate)}% = ${formatPlainNumber(result.amountDeduction)}
+    final commissionLine = result.commissionTracking
+        ? 'Commission ${formatMoney(result.commissionEarned, showCurrency: false)} (kept separate)'
+        : '''${formatPlainNumber(result.totalAmount)} × ${formatPlainNumber(result.amountDeductionRate)}% = ${formatPlainNumber(result.commissionEarned)}
 
-${formatPlainNumber(result.totalAmount)} − ${formatPlainNumber(result.amountDeduction)} = ${formatPlainNumber(result.netTotalAmount)}
+${formatPlainNumber(result.totalAmount)} − ${formatPlainNumber(result.commissionEarned)} = ${formatPlainNumber(result.netTotalAmount)}''';
+
+    return '''
+$commissionLine
 
 ${formatPlainNumber(result.totalBracket)} × ${formatPlainNumber(result.passingRate)} = ${formatMoney(result.passing, showCurrency: false)}
 

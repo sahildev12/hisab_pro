@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/storage.dart';
 import '../models/history_entry.dart';
 import '../theme/app_theme.dart';
+import '../widgets/hisab_page_header.dart';
 import 'entry_names_screen.dart';
 import 'history_screen.dart';
 
@@ -53,12 +54,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.pagePadding),
+      backgroundColor: isDarkContext(context)
+          ? AppColors.canvasDark
+          : HisabPageColors.canvas,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          HisabPageHeader(
+            title: 'Settings',
+            subtitle: 'App preferences',
+            onBack: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.pagePadding),
+              children: [
           _SettingsTile(
             icon: Icons.list_alt_outlined,
             title: 'Entry Names',
@@ -117,6 +127,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
               ],
             ),
           ),

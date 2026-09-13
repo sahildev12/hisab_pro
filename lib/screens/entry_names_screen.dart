@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../constants/entry_names.dart';
 import '../core/storage.dart';
 import '../theme/app_theme.dart';
+import '../widgets/hisab_page_header.dart';
+import '../widgets/hisab_pro_modal.dart';
 
 class EntryNamesScreen extends StatefulWidget {
   const EntryNamesScreen({
@@ -54,24 +56,12 @@ class _EntryNamesScreenState extends State<EntryNamesScreen> {
 
   Future<void> _deleteName(int index) async {
     final name = _customNames[index];
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showHisabProConfirmDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete "$name"?'),
-        content: const Text(
-          'This name will no longer appear in new entries.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      title: 'Delete "$name"?',
+      message: 'This name will no longer appear in new entries.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
     if (confirmed != true) return;
     setState(() {
@@ -90,18 +80,33 @@ class _EntryNamesScreenState extends State<EntryNamesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Entry Names'),
-        actions: [
-          TextButton(
-            onPressed: _save,
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.pagePadding),
+      backgroundColor: isDarkContext(context)
+          ? AppColors.canvasDark
+          : HisabPageColors.canvas,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          HisabPageHeader(
+            title: 'Entry Names',
+            subtitle: 'Manage custom entry names',
+            onBack: () => Navigator.pop(context),
+            actions: [
+              TextButton(
+                onPressed: _save,
+                child: Text(
+                  'Save',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.pagePadding),
+              children: [
           Text(
             'Add New Entry Name',
             style: GoogleFonts.inter(
@@ -171,6 +176,9 @@ class _EntryNamesScreenState extends State<EntryNamesScreen> {
               }
               return _nameRow(_customNames[index], index);
             }),
+              ],
+            ),
+          ),
         ],
       ),
     );

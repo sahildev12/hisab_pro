@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:intl/intl.dart';
 
 import '../constants/fixed_names.dart';
@@ -18,6 +19,27 @@ List<String> _allowedNamesForRows(List<RowData> rows) {
 }
 
 enum HistoryFilter { all, drafts, lene, dene }
+
+enum HistorySort {
+  newest,
+  oldest,
+  amountHigh,
+  amountLow,
+}
+
+enum HistoryGroupMode { byDate, none }
+
+/// Title for history list cards — never appends "(Draft)".
+String historyListTitle(HistoryEntry entry, {required bool isDraft}) {
+  var title = entry.title.trim();
+  title = title
+      .replaceAll(RegExp(r'\s*\(draft\)\s*$', caseSensitive: false), '')
+      .trim();
+  if (title.isEmpty) {
+    return isDraft ? 'Untitled' : 'Calculation';
+  }
+  return title;
+}
 
 class HistoryDisplayItem {
   const HistoryDisplayItem({
@@ -46,6 +68,9 @@ class HistoryDisplayItem {
     return trimmed;
   }
 
+  /// Clean title for history list — no "(Draft)" suffix.
+  String get listTitle => historyListTitle(entry, isDraft: isDraft);
+
   static HistoryDisplayItem fromEntry(HistoryEntry entry) {
     CalculationResult? result;
     try {
@@ -58,6 +83,12 @@ class HistoryDisplayItem {
           entry.rows,
           passingRate: entry.passingRate,
           amountDeductionRate: entry.amountDeductionRate,
+          commissionTracking: entry.commissionTracking,
+          storedCommissionBalance: entry.commissionTracking
+              ? entry.commissionBalanceAtThatTime - entry.commissionEarned
+              : Decimal.zero,
+        ).copyWith(
+          commissionBalance: entry.commissionBalanceAtThatTime,
         );
       }
     } catch (_) {
@@ -84,6 +115,36 @@ String historyDateGroupLabel(DateTime date) {
   if (day == today) return 'Today';
   if (day == today.subtract(const Duration(days: 1))) return 'Yesterday';
   return DateFormat('d MMM yyyy').format(date);
+}
+
+List<HistoryDisplayItem> sortHistoryItems(
+  List<HistoryDisplayItem> items,
+  HistorySort sort,
+) {
+  final sorted = List<HistoryDisplayItem>.from(items);
+  switch (sort) {
+    case HistorySort.newest:
+      sorted.sort((a, b) => b.entry.savedAt.compareTo(a.entry.savedAt));
+    case HistorySort.oldest:
+      sorted.sort((a, b) => a.entry.savedAt.compareTo(b.entry.savedAt));
+    case HistorySort.amountHigh:
+      sorted.sort((a, b) {
+        final amountA = a.result?.displayAmount ?? Decimal.zero;
+        final amountB = b.result?.displayAmount ?? Decimal.zero;
+        final byAmount = amountB.compareTo(amountA);
+        if (byAmount != 0) return byAmount;
+        return b.entry.savedAt.compareTo(a.entry.savedAt);
+      });
+    case HistorySort.amountLow:
+      sorted.sort((a, b) {
+        final amountA = a.result?.displayAmount ?? Decimal.zero;
+        final amountB = b.result?.displayAmount ?? Decimal.zero;
+        final byAmount = amountA.compareTo(amountB);
+        if (byAmount != 0) return byAmount;
+        return b.entry.savedAt.compareTo(a.entry.savedAt);
+      });
+  }
+  return sorted;
 }
 
 List<HistoryDateGroup> groupHistoryByDate(List<HistoryDisplayItem> items) {

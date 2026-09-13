@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../core/storage.dart';
 import '../theme/app_theme.dart';
+import '../widgets/hisab_page_header.dart';
 
 class AppearanceScreen extends StatefulWidget {
   const AppearanceScreen({
@@ -41,12 +42,21 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Appearance'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.pagePadding),
+      backgroundColor: isDark
+          ? AppColors.canvasDark
+          : HisabPageColors.canvas,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          HisabPageHeader(
+            title: 'Appearance',
+            subtitle: 'Theme and display',
+            onBack: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.pagePadding),
+              children: [
           Text(
             'Theme',
             style: GoogleFonts.inter(
@@ -70,6 +80,9 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
             subtitle: 'Easier on the eyes at night',
             selected: _settings.darkMode,
             onTap: () => _setDarkMode(true),
+          ),
+              ],
+            ),
           ),
         ],
       ),

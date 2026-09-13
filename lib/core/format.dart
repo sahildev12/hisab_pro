@@ -53,3 +53,10 @@ String formatHistoryDate(DateTime date) {
   final timePart = DateFormat('h:mm a').format(date);
   return '$datePart $timePart';
 }
+
+/// History card subtitle — date and time separated by a bullet.
+String formatHistoryCardDate(DateTime date) {
+  final datePart = DateFormat('d MMM yyyy').format(date);
+  final timePart = DateFormat('h:mm a').format(date);
+  return '$datePart • $timePart';
+}

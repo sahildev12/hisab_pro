@@ -3,7 +3,7 @@ import 'package:decimal/decimal.dart';
 import 'row_data.dart';
 
 class HistoryEntry {
-  const HistoryEntry({
+  HistoryEntry({
     required this.id,
     required this.title,
     required this.rows,
@@ -12,7 +12,12 @@ class HistoryEntry {
     required this.savedAt,
     this.status = 'COMPLETED',
     this.updatedAt,
-  });
+    this.commissionTracking = false,
+    Decimal? commissionEarned,
+    Decimal? commissionBalanceAtThatTime,
+  })  : commissionEarned = commissionEarned ?? Decimal.zero,
+        commissionBalanceAtThatTime =
+            commissionBalanceAtThatTime ?? Decimal.zero;
 
   static const draftStatus = 'DRAFT';
   static const completedStatus = 'COMPLETED';
@@ -26,6 +31,9 @@ class HistoryEntry {
   final DateTime savedAt;
   final String status;
   final DateTime? updatedAt;
+  final bool commissionTracking;
+  final Decimal commissionEarned;
+  final Decimal commissionBalanceAtThatTime;
 
   bool get isDraft => status == draftStatus;
 
@@ -38,6 +46,9 @@ class HistoryEntry {
         'savedAt': savedAt.toIso8601String(),
         'status': status,
         if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+        'commissionTracking': commissionTracking,
+        'commissionEarned': commissionEarned.toString(),
+        'commissionBalanceAtThatTime': commissionBalanceAtThatTime.toString(),
       };
 
   HistoryEntry copyWith({
@@ -49,6 +60,9 @@ class HistoryEntry {
     DateTime? savedAt,
     String? status,
     DateTime? updatedAt,
+    bool? commissionTracking,
+    Decimal? commissionEarned,
+    Decimal? commissionBalanceAtThatTime,
   }) {
     return HistoryEntry(
       id: id ?? this.id,
@@ -60,11 +74,28 @@ class HistoryEntry {
       savedAt: savedAt ?? this.savedAt,
       status: status ?? this.status,
       updatedAt: updatedAt ?? this.updatedAt,
+      commissionTracking: commissionTracking ?? this.commissionTracking,
+      commissionEarned: commissionEarned ?? this.commissionEarned,
+      commissionBalanceAtThatTime:
+          commissionBalanceAtThatTime ?? this.commissionBalanceAtThatTime,
     );
   }
 
   factory HistoryEntry.fromJson(Map<String, dynamic> json) {
     final rawRows = json['rows'] as List<dynamic>? ?? [];
+    final legacyTracking = json['commissionSeparate'] as bool? ?? false;
+    final tracking =
+        json['commissionTracking'] as bool? ?? legacyTracking;
+
+    Decimal commissionEarned = Decimal.zero;
+    if (json['commissionEarned'] != null) {
+      commissionEarned =
+          Decimal.parse(json['commissionEarned'].toString());
+    } else if (json['commissionAmount'] != null && tracking) {
+      commissionEarned =
+          Decimal.parse(json['commissionAmount'].toString());
+    }
+
     return HistoryEntry(
       id: json['id'] as String,
       title: json['title'] as String? ?? '',
@@ -80,6 +111,11 @@ class HistoryEntry {
       updatedAt: json['updatedAt'] != null
           ? DateTime.parse(json['updatedAt'] as String)
           : null,
+      commissionTracking: tracking,
+      commissionEarned: commissionEarned,
+      commissionBalanceAtThatTime: json['commissionBalanceAtThatTime'] != null
+          ? Decimal.parse(json['commissionBalanceAtThatTime'].toString())
+          : Decimal.zero,
     );
   }
 

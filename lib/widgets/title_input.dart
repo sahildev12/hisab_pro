@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/app_theme.dart';
+import 'dismiss_keyboard.dart';
 
 class TitleInput extends StatelessWidget {
   const TitleInput({
@@ -26,6 +27,7 @@ class TitleInput extends StatelessWidget {
             return TextField(
               controller: controller,
               onChanged: onChanged,
+              onTapOutside: (_) => DismissKeyboard.unfocus(),
               textCapitalization: TextCapitalization.sentences,
               style: GoogleFonts.inter(
                 fontSize: 16,

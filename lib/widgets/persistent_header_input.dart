@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/app_theme.dart';
+import 'dismiss_keyboard.dart';
 
 /// Persistent header text (labeled "Date") — never cleared by calculation actions.
 class PersistentHeaderInput extends StatelessWidget {
@@ -21,27 +22,43 @@ class PersistentHeaderInput extends StatelessWidget {
       children: [
         Text('Date', style: sectionLabelStyle(context)),
         const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          onChanged: onChanged,
-          textCapitalization: TextCapitalization.sentences,
-          style: GoogleFonts.inter(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-            color: AppColors.inkDeep,
-          ),
-          decoration: InputDecoration(
-            hintText: 'Enter date or label',
-            hintStyle: GoogleFonts.inter(
-              color: AppColors.stone,
-              fontWeight: FontWeight.w400,
-            ),
-            prefixIcon: const Icon(
-              Icons.calendar_today_outlined,
-              size: 18,
-              color: AppColors.slate,
-            ),
-          ),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: controller,
+          builder: (context, value, _) {
+            return TextField(
+              controller: controller,
+              onChanged: onChanged,
+              onTapOutside: (_) => DismissKeyboard.unfocus(),
+              textCapitalization: TextCapitalization.sentences,
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: AppColors.inkDeep,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Enter date or label',
+                hintStyle: GoogleFonts.inter(
+                  color: AppColors.stone,
+                  fontWeight: FontWeight.w400,
+                ),
+                prefixIcon: const Icon(
+                  Icons.calendar_today_outlined,
+                  size: 18,
+                  color: AppColors.slate,
+                ),
+                suffixIcon: value.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        color: AppColors.slate,
+                        onPressed: () {
+                          controller.clear();
+                          onChanged('');
+                        },
+                      )
+                    : null,
+              ),
+            );
+          },
         ),
       ],
     );

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/validate.dart';
+import 'dismiss_keyboard.dart';
 import '../models/row_data.dart';
 import '../theme/app_theme.dart';
 
@@ -29,9 +30,11 @@ class RowTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
       decoration: surfaceDecoration(context),
       clipBehavior: Clip.antiAlias,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
@@ -56,30 +59,24 @@ class RowTable extends StatelessWidget {
               ],
             ),
           ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth: MediaQuery.sizeOf(context).width - 48,
-              ),
-              child: Column(
-                children: [
-                  const _TableHeader(),
-                  ...List.generate(rows.length, (index) {
-                    return _RowEntry(
-                      key: ValueKey(rows[index].id),
-                      index: index,
-                      row: rows[index],
-                      entryNames: entryNames,
-                      hasError: errorRowIndex == index,
-                      onChanged: (updated) => onRowChanged(index, updated),
-                      onDelete: () => onDeleteRow(index),
-                    );
-                  }),
-                ],
-              ),
-            ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12),
+            child: _TableHeader(),
           ),
+          ...List.generate(rows.length, (index) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: _RowEntry(
+                key: ValueKey(rows[index].id),
+                index: index,
+                row: rows[index],
+                entryNames: entryNames,
+                hasError: errorRowIndex == index,
+                onChanged: (updated) => onRowChanged(index, updated),
+                onDelete: () => onDeleteRow(index),
+              ),
+            );
+          }),
           Material(
             color: AppColors.lightBlue,
             child: InkWell(
@@ -117,31 +114,46 @@ class _TableHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          _headerCell('Name', 80),
-          _headerCell('Amount', 100),
-          _headerCell('Bracket', 80),
-          const SizedBox(width: 40),
+          Expanded(
+            flex: 3,
+            child: _HeaderLabel('Name'),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: _HeaderLabel('Amount'),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            flex: 3,
+            child: _HeaderLabel('Bracket'),
+          ),
+          SizedBox(width: 44),
         ],
       ),
     );
   }
+}
 
-  Widget _headerCell(String text, double width) {
-    return SizedBox(
-      width: width,
-      child: Text(
-        text,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: AppColors.secondaryText,
-        ),
+class _HeaderLabel extends StatelessWidget {
+  const _HeaderLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: GoogleFonts.inter(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: AppColors.secondaryText,
       ),
     );
   }
@@ -221,7 +233,7 @@ class _RowEntryState extends State<_RowEntry> {
     final borderColor = widget.hasError ? AppColors.danger : AppColors.border;
     return InputDecoration(
       isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       filled: true,
       fillColor: AppColors.surface,
       enabledBorder: OutlineInputBorder(
@@ -246,14 +258,15 @@ class _RowEntryState extends State<_RowEntry> {
 
     return Container(
       height: AppSpacing.rowHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 80,
+          Expanded(
+            flex: 3,
             child: DropdownButtonFormField<String>(
               key: ValueKey('${widget.row.id}-${widget.row.name}'),
               initialValue: selectedName,
@@ -264,43 +277,49 @@ class _RowEntryState extends State<_RowEntry> {
               items: widget.entryNames
                   .map((n) => DropdownMenuItem(value: n, child: Text(n)))
                   .toList(),
+              onTap: DismissKeyboard.unfocus,
               onChanged: (v) {
+                DismissKeyboard.unfocus();
                 if (v != null) _emit(name: v);
               },
             ),
           ),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 100,
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
             child: TextField(
               controller: _amountController,
               decoration: _cellDeco(),
               keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.next,
               inputFormatters: [_amountFormatter],
+              onTapOutside: (_) => DismissKeyboard.unfocus(),
               onChanged: (_) => _emit(),
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 80,
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 3,
             child: TextField(
               controller: _bracketController,
               decoration: _cellDeco(),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textInputAction: TextInputAction.done,
               inputFormatters: [_bracketFormatter],
+              onTapOutside: (_) => DismissKeyboard.unfocus(),
               onChanged: (_) => _emit(),
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
           SizedBox(
-            width: 40,
+            width: 44,
             child: IconButton(
               onPressed: widget.onDelete,
               icon: const Icon(Icons.delete_outline, size: 18),
               color: AppColors.danger,
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             ),
           ),
         ],

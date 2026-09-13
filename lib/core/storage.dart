@@ -13,24 +13,28 @@ const _legacyCalculationKey = 'hisabpro-v1';
 const _settingsKey = 'hisabpro-settings';
 const _historyKey = 'hisabpro-history';
 const _persistentHeaderKey = 'hisabpro-persistent-header';
+const _commissionBalancesKey = 'hisabpro-commission-balances';
 const historyRetentionDays = 35;
 
 class AppSettings {
   const AppSettings({
     required this.defaultPassingRate,
     required this.defaultAmountDeductionRate,
+    this.defaultCommissionTracking = false,
     this.customEntryNames = const [],
     this.darkMode = false,
   });
 
   final Decimal defaultPassingRate;
   final Decimal defaultAmountDeductionRate;
+  final bool defaultCommissionTracking;
   final List<String> customEntryNames;
   final bool darkMode;
 
   Map<String, dynamic> toJson() => {
         'defaultPassingRate': defaultPassingRate.toString(),
         'defaultAmountDeductionRate': defaultAmountDeductionRate.toString(),
+        'defaultCommissionTracking': defaultCommissionTracking,
         'customEntryNames': customEntryNames,
         'darkMode': darkMode,
       };
@@ -47,6 +51,8 @@ class AppSettings {
         defaultAmountDeductionRate: Decimal.parse(
           (json['defaultAmountDeductionRate'] ?? '4').toString(),
         ),
+        defaultCommissionTracking:
+            json['defaultCommissionTracking'] as bool? ?? false,
         customEntryNames: custom,
         darkMode: json['darkMode'] as bool? ?? false,
       );
@@ -69,6 +75,7 @@ class AppSettings {
   AppSettings copyWith({
     Decimal? defaultPassingRate,
     Decimal? defaultAmountDeductionRate,
+    bool? defaultCommissionTracking,
     List<String>? customEntryNames,
     bool? darkMode,
   }) {
@@ -76,6 +83,8 @@ class AppSettings {
       defaultPassingRate: defaultPassingRate ?? this.defaultPassingRate,
       defaultAmountDeductionRate:
           defaultAmountDeductionRate ?? this.defaultAmountDeductionRate,
+      defaultCommissionTracking:
+          defaultCommissionTracking ?? this.defaultCommissionTracking,
       customEntryNames: customEntryNames ?? this.customEntryNames,
       darkMode: darkMode ?? this.darkMode,
     );
@@ -83,7 +92,7 @@ class AppSettings {
 }
 
 class DraftState {
-  const DraftState({
+  DraftState({
     required this.title,
     required this.rows,
     required this.passingRate,
@@ -91,6 +100,7 @@ class DraftState {
     this.lastView = 'main',
     this.historyEntryId,
     this.updatedAt,
+    this.commissionTracking = false,
   });
 
   final String title;
@@ -100,6 +110,7 @@ class DraftState {
   final String lastView;
   final String? historyEntryId;
   final DateTime? updatedAt;
+  final bool commissionTracking;
 
   Map<String, dynamic> toJson() => {
         'title': title,
@@ -109,6 +120,7 @@ class DraftState {
         'lastView': lastView,
         if (historyEntryId != null) 'historyEntryId': historyEntryId,
         if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+        'commissionTracking': commissionTracking,
       };
 
   factory DraftState.fromJson(
@@ -152,6 +164,9 @@ class DraftState {
       updatedAt: json['updatedAt'] != null
           ? DateTime.parse(json['updatedAt'] as String)
           : null,
+      commissionTracking: json['commissionTracking'] as bool? ??
+          json['commissionSeparate'] as bool? ??
+          false,
     );
   }
 
@@ -169,6 +184,8 @@ class DraftState {
     required String status,
     DateTime? savedAt,
     DateTime? updatedAt,
+    Decimal? commissionEarned,
+    Decimal? commissionBalanceAtThatTime,
   }) {
     final now = DateTime.now();
     return HistoryEntry(
@@ -180,6 +197,9 @@ class DraftState {
       savedAt: savedAt ?? updatedAt ?? now,
       updatedAt: updatedAt ?? now,
       status: status,
+      commissionTracking: commissionTracking,
+      commissionEarned: commissionEarned,
+      commissionBalanceAtThatTime: commissionBalanceAtThatTime,
     );
   }
 }
@@ -362,5 +382,44 @@ class StorageService {
   Future<void> savePersistentHeader(String text) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_persistentHeaderKey, text);
+  }
+
+  Future<Map<String, Decimal>> loadCommissionBalances() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_commissionBalancesKey);
+    if (raw == null || raw.isEmpty) return {};
+
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return map.map(
+        (key, value) => MapEntry(key, Decimal.parse(value.toString())),
+      );
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Decimal> getCommissionBalance(String ownerId) async {
+    final balances = await loadCommissionBalances();
+    return balances[ownerId] ?? Decimal.zero;
+  }
+
+  Future<void> setCommissionBalance(String ownerId, Decimal balance) async {
+    final balances = await loadCommissionBalances();
+    if (balance <= Decimal.zero) {
+      balances.remove(ownerId);
+    } else {
+      balances[ownerId] = balance;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = balances.map(
+      (key, value) => MapEntry(key, value.toString()),
+    );
+    await prefs.setString(_commissionBalancesKey, jsonEncode(encoded));
+  }
+
+  Future<void> clearCommissionBalance(String ownerId) async {
+    await setCommissionBalance(ownerId, Decimal.zero);
   }
 }

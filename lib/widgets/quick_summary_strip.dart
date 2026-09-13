@@ -23,8 +23,10 @@ class QuickSummaryStrip extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _row(
-            '${formatPlainNumber(result.amountDeductionRate)}% Amount Deduction',
-            formatMoney(result.amountDeduction, showCurrency: true),
+            result.commissionTracking
+                ? 'Commission @ ${formatPlainNumber(result.amountDeductionRate)}% (separate)'
+                : 'Commission @ ${formatPlainNumber(result.amountDeductionRate)}%',
+            formatMoney(result.commissionEarned, showCurrency: true),
           ),
           const SizedBox(height: 8),
           _row(

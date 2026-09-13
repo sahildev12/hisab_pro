@@ -10,7 +10,7 @@ import 'validate.dart';
 /// Default passing rate (multiplier, e.g. 96 means × 96 on total bracket).
 final Decimal defaultPassingRate = Decimal.parse('96');
 
-/// Default amount deduction rate (percentage of total amount).
+/// Default commission / deduction rate (percentage of total amount).
 final Decimal defaultAmountDeductionRate = Decimal.parse('4');
 
 Decimal _sumDecimals(Iterable<Decimal> values) {
@@ -29,14 +29,17 @@ ResultType _resolveResultType(Decimal roundedDifference) {
 
 /// Single source of truth for all settlement calculations.
 ///
-/// Business rules:
-/// - Amount deduction: round(totalAmount × amountDeductionRate / 100)
-/// - Passing: totalBracket × passingRate (multiplier, NOT divided by 100)
-/// - Final difference: round(netTotalAmount − passing) — whole rupees only
+/// Commission is always `totalAmount × amountDeductionRate / 100`.
+///
+/// When [commissionTracking] is true (paid later), commission is not deducted
+/// from the main total. When false (paid daily), commission is subtracted
+/// before comparing to passing.
 CalculationResult calculateSettlement(
   List<RowData> rows, {
   required Decimal passingRate,
   required Decimal amountDeductionRate,
+  bool commissionTracking = false,
+  Decimal? storedCommissionBalance,
 }) {
   final activeRows = rows.where((row) => !isRowEmpty(row)).toList();
 
@@ -44,19 +47,29 @@ CalculationResult calculateSettlement(
   final brackets = activeRows.map((row) => parseDecimal(row.bracket));
 
   final totalAmount = _sumDecimals(amounts);
-  final amountDeduction =
+  final commissionEarned =
       roundMoney(percentOf(totalAmount, amountDeductionRate));
-  final netTotalAmount = totalAmount - amountDeduction;
+
+  final netTotalAmount = commissionTracking
+      ? totalAmount
+      : totalAmount - commissionEarned;
+
   final totalBracket = _sumDecimals(brackets);
   final passing = totalBracket * passingRate;
+
   final rawDifference = netTotalAmount - passing;
   final finalBalance = roundMoney(rawDifference);
   final resultType = _resolveResultType(finalBalance);
   final displayAmount = finalBalance.abs();
 
+  final balance = storedCommissionBalance ?? Decimal.zero;
+  final commissionBalance = commissionTracking
+      ? balance + commissionEarned
+      : Decimal.zero;
+
   return CalculationResult(
     totalAmount: totalAmount,
-    amountDeduction: amountDeduction,
+    amountDeduction: commissionEarned,
     netTotalAmount: netTotalAmount,
     totalBracket: totalBracket,
     passing: passing,
@@ -65,5 +78,9 @@ CalculationResult calculateSettlement(
     passingRate: passingRate,
     amountDeductionRate: amountDeductionRate,
     resultType: resultType,
+    commissionEarned: commissionEarned,
+    commissionTracking: commissionTracking,
+    commissionBalance: commissionBalance,
+    storedCommissionBalance: balance,
   );
 }

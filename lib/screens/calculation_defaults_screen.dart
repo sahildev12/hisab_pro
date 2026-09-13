@@ -28,6 +28,7 @@ class _CalculationDefaultsScreenState extends State<CalculationDefaultsScreen> {
   String? _passingError;
   String? _deductionError;
   bool _deductionLinked = true;
+  bool _defaultCommissionTracking = false;
   bool _saved = false;
 
   @override
@@ -41,6 +42,8 @@ class _CalculationDefaultsScreenState extends State<CalculationDefaultsScreen> {
         widget.initialSettings.defaultAmountDeductionRate,
       ),
     );
+    _defaultCommissionTracking =
+        widget.initialSettings.defaultCommissionTracking;
   }
 
   @override
@@ -89,6 +92,7 @@ class _CalculationDefaultsScreenState extends State<CalculationDefaultsScreen> {
     final updated = widget.initialSettings.copyWith(
       defaultPassingRate: parsePassingRate(_passingController.text),
       defaultAmountDeductionRate: parseDeductionRate(_deductionController.text),
+      defaultCommissionTracking: _defaultCommissionTracking,
     );
 
     setState(() => _saved = true);
@@ -124,11 +128,49 @@ class _CalculationDefaultsScreenState extends State<CalculationDefaultsScreen> {
             const SizedBox(height: 14),
             _rateCard(
               icon: Icons.remove_circle_outline,
-              label: 'Amount Deduction',
-              hint: 'Deducted from Total Amount (e.g. 56000 × 4%)',
+              label: 'Commission / Deduction Rate',
+              hint:
+                  'Commission rate from Total Amount. Deducted daily when tracking is off.',
               controller: _deductionController,
               error: _deductionError,
               onChanged: _onDeductionChanged,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: surfaceDecoration(context),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Keep Commission Separate by Default',
+                          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'New calculations will track commission separately.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.secondaryText,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: _defaultCommissionTracking,
+                    onChanged: (value) {
+                      setState(() {
+                        _defaultCommissionTracking = value;
+                        _saved = false;
+                      });
+                    },
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Text(

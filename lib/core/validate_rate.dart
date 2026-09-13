@@ -17,10 +17,10 @@ RateValidationResult validatePassingRate(String value) {
       errorMessage: 'Enter a valid passing rate.',
     );
   }
-  if (parsed <= Decimal.zero) {
+  if (parsed <= Decimal.zero || parsed > Decimal.fromInt(100)) {
     return const RateValidationResult(
       isValid: false,
-      errorMessage: 'Passing rate must be greater than 0.',
+      errorMessage: 'Enter a valid rate between 0 and 100.',
     );
   }
   return const RateValidationResult(isValid: true);
@@ -34,10 +34,10 @@ RateValidationResult validateDeductionRate(String value) {
       errorMessage: 'Enter a valid amount deduction rate.',
     );
   }
-  if (parsed < Decimal.zero || parsed > Decimal.fromInt(100)) {
+  if (parsed <= Decimal.zero || parsed > Decimal.fromInt(100)) {
     return const RateValidationResult(
       isValid: false,
-      errorMessage: 'Amount deduction must be between 0 and 100.',
+      errorMessage: 'Enter a valid rate between 0 and 100.',
     );
   }
   return const RateValidationResult(isValid: true);

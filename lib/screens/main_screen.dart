@@ -92,12 +92,17 @@ class MainScreen extends StatefulWidget {
     required this.onOpenHistoryEntry,
 
     this.onDeleteHistoryEntry,
-
+    this.groupId,
+    this.hideAppHeader = false,
+    this.historyGroupIdFilter,
   });
 
 
 
   final StorageService storage;
+  final String? groupId;
+  final bool hideAppHeader;
+  final String? historyGroupIdFilter;
 
   final String initialTitle;
 
@@ -298,26 +303,21 @@ class _MainScreenState extends State<MainScreen> {
 
 
   Future<void> _persist() async {
-
-    await widget.storage.saveDraft(
-
-      DraftState(
-
-        title: _titleController.text,
-
-        rows: _rows,
-
-        passingRate: _passingRate,
-
-        amountDeductionRate: _amountDeductionRate,
-
-        commissionTracking: _commissionTracking,
-
-        lastView: 'main',
-
-      ),
-
+    final draft = DraftState(
+      title: _titleController.text,
+      rows: _rows,
+      passingRate: _passingRate,
+      amountDeductionRate: _amountDeductionRate,
+      commissionTracking: _commissionTracking,
+      lastView: 'main',
+      groupId: widget.groupId,
     );
+
+    if (widget.groupId != null) {
+      await widget.storage.saveGroupDraft(widget.groupId!, draft);
+    } else {
+      await widget.storage.saveDraft(draft);
+    }
 
     widget.onDraftChanged(
 
@@ -662,13 +662,10 @@ class _MainScreenState extends State<MainScreen> {
       MaterialPageRoute(
 
         builder: (context) => HistoryScreen(
-
           storage: widget.storage,
-
+          groupIdFilter: widget.historyGroupIdFilter,
           onEditEntry: widget.onOpenHistoryEntry,
-
           onDeleteEntry: widget.onDeleteHistoryEntry,
-
         ),
 
       ),
@@ -713,15 +710,12 @@ class _MainScreenState extends State<MainScreen> {
 
                 children: [
 
-                  Header(
-
-                    onSettingsTap: _openSettings,
-
-                    onHistoryTap: _openHistory,
-
-                    onCommissionTap: _openTotalCommission,
-
-                  ),
+                  if (!widget.hideAppHeader)
+                    Header(
+                      onSettingsTap: _openSettings,
+                      onHistoryTap: _openHistory,
+                      onCommissionTap: _openTotalCommission,
+                    ),
 
                   if (_saveStatus.isNotEmpty) ...[
 

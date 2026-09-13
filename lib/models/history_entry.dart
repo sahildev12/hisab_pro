@@ -15,6 +15,8 @@ class HistoryEntry {
     this.commissionTracking = false,
     Decimal? commissionEarned,
     Decimal? commissionBalanceAtThatTime,
+    this.groupId,
+    this.originalPastedText,
   })  : commissionEarned = commissionEarned ?? Decimal.zero,
         commissionBalanceAtThatTime =
             commissionBalanceAtThatTime ?? Decimal.zero;
@@ -34,6 +36,8 @@ class HistoryEntry {
   final bool commissionTracking;
   final Decimal commissionEarned;
   final Decimal commissionBalanceAtThatTime;
+  final String? groupId;
+  final String? originalPastedText;
 
   bool get isDraft => status == draftStatus;
 
@@ -49,6 +53,9 @@ class HistoryEntry {
         'commissionTracking': commissionTracking,
         'commissionEarned': commissionEarned.toString(),
         'commissionBalanceAtThatTime': commissionBalanceAtThatTime.toString(),
+        if (groupId != null) 'groupId': groupId,
+        if (originalPastedText != null)
+          'originalPastedText': originalPastedText,
       };
 
   HistoryEntry copyWith({
@@ -63,6 +70,8 @@ class HistoryEntry {
     bool? commissionTracking,
     Decimal? commissionEarned,
     Decimal? commissionBalanceAtThatTime,
+    String? groupId,
+    String? originalPastedText,
   }) {
     return HistoryEntry(
       id: id ?? this.id,
@@ -78,6 +87,8 @@ class HistoryEntry {
       commissionEarned: commissionEarned ?? this.commissionEarned,
       commissionBalanceAtThatTime:
           commissionBalanceAtThatTime ?? this.commissionBalanceAtThatTime,
+      groupId: groupId ?? this.groupId,
+      originalPastedText: originalPastedText ?? this.originalPastedText,
     );
   }
 
@@ -116,6 +127,8 @@ class HistoryEntry {
       commissionBalanceAtThatTime: json['commissionBalanceAtThatTime'] != null
           ? Decimal.parse(json['commissionBalanceAtThatTime'].toString())
           : Decimal.zero,
+      groupId: json['groupId'] as String?,
+      originalPastedText: json['originalPastedText'] as String?,
     );
   }
 

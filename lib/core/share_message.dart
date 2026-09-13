@@ -6,3 +6,11 @@ Future<void> shareCalculationMessage(String message) async {
   await Clipboard.setData(ClipboardData(text: message));
   await SharePlus.instance.share(ShareParams(text: message));
 }
+
+Future<void> copyCalculationMessage(String message) async {
+  await Clipboard.setData(ClipboardData(text: message));
+}
+
+Future<void> shareOnlyCalculationMessage(String message) async {
+  await SharePlus.instance.share(ShareParams(text: message));
+}

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:decimal/decimal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/calculation_group.dart';
 import '../models/history_entry.dart';
 import '../models/row_data.dart';
 import 'calculate.dart' as calc;
@@ -14,6 +15,9 @@ const _settingsKey = 'hisabpro-settings';
 const _historyKey = 'hisabpro-history';
 const _persistentHeaderKey = 'hisabpro-persistent-header';
 const _commissionBalancesKey = 'hisabpro-commission-balances';
+const _groupsKey = 'hisabpro-groups';
+const _groupDraftPrefix = 'hisabpro-group-draft-';
+const _pasteCalculationDraftKey = 'hisabpro-paste-calculation-draft';
 const historyRetentionDays = 35;
 
 class AppSettings {
@@ -101,6 +105,8 @@ class DraftState {
     this.historyEntryId,
     this.updatedAt,
     this.commissionTracking = false,
+    this.groupId,
+    this.originalPastedText,
   });
 
   final String title;
@@ -111,6 +117,8 @@ class DraftState {
   final String? historyEntryId;
   final DateTime? updatedAt;
   final bool commissionTracking;
+  final String? groupId;
+  final String? originalPastedText;
 
   Map<String, dynamic> toJson() => {
         'title': title,
@@ -121,6 +129,9 @@ class DraftState {
         if (historyEntryId != null) 'historyEntryId': historyEntryId,
         if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
         'commissionTracking': commissionTracking,
+        if (groupId != null) 'groupId': groupId,
+        if (originalPastedText != null)
+          'originalPastedText': originalPastedText,
       };
 
   factory DraftState.fromJson(
@@ -167,6 +178,8 @@ class DraftState {
       commissionTracking: json['commissionTracking'] as bool? ??
           json['commissionSeparate'] as bool? ??
           false,
+      groupId: json['groupId'] as String?,
+      originalPastedText: json['originalPastedText'] as String?,
     );
   }
 
@@ -186,6 +199,8 @@ class DraftState {
     DateTime? updatedAt,
     Decimal? commissionEarned,
     Decimal? commissionBalanceAtThatTime,
+    String? groupId,
+    String? originalPastedText,
   }) {
     final now = DateTime.now();
     return HistoryEntry(
@@ -200,6 +215,8 @@ class DraftState {
       commissionTracking: commissionTracking,
       commissionEarned: commissionEarned,
       commissionBalanceAtThatTime: commissionBalanceAtThatTime,
+      groupId: groupId ?? this.groupId,
+      originalPastedText: originalPastedText ?? this.originalPastedText,
     );
   }
 }
@@ -285,6 +302,25 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_draftKey);
     await prefs.remove(_legacyCalculationKey);
+  }
+
+  Future<String?> loadPasteCalculationDraft() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_pasteCalculationDraftKey);
+  }
+
+  Future<void> savePasteCalculationDraft(String text) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (text.trim().isEmpty) {
+      await prefs.remove(_pasteCalculationDraftKey);
+      return;
+    }
+    await prefs.setString(_pasteCalculationDraftKey, text);
+  }
+
+  Future<void> clearPasteCalculationDraft() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_pasteCalculationDraftKey);
   }
 
   Future<List<HistoryEntry>> loadHistory() async {
@@ -421,5 +457,143 @@ class StorageService {
 
   Future<void> clearCommissionBalance(String ownerId) async {
     await setCommissionBalance(ownerId, Decimal.zero);
+  }
+
+  // ── Groups ──────────────────────────────────────────────────────────────
+
+  Future<List<CalculationGroup>> loadGroups() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_groupsKey);
+    if (raw == null || raw.isEmpty) return [];
+
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map(
+            (item) =>
+                CalculationGroup.fromJson(item as Map<String, dynamic>),
+          )
+          .toList()
+        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveGroups(List<CalculationGroup> groups) async {
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = groups.map((g) => g.toJson()).toList();
+    await prefs.setString(_groupsKey, jsonEncode(encoded));
+  }
+
+  Future<void> upsertGroup(CalculationGroup group) async {
+    final groups = await loadGroups();
+    final index = groups.indexWhere((g) => g.id == group.id);
+    if (index >= 0) {
+      groups[index] = group;
+    } else {
+      groups.insert(0, group);
+    }
+    groups.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    await saveGroups(groups);
+  }
+
+  Future<void> deleteGroup(String groupId) async {
+    final groups = await loadGroups();
+    groups.removeWhere((g) => g.id == groupId);
+    await saveGroups(groups);
+
+    final history = await loadHistory();
+    history.removeWhere((e) => e.groupId == groupId);
+    await saveHistory(history);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_groupDraftPrefix$groupId');
+  }
+
+  Future<DraftState?> loadGroupDraft(
+    String groupId, {
+    Decimal? fallbackPassingRate,
+    Decimal? fallbackAmountDeductionRate,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_groupDraftPrefix$groupId');
+    if (raw == null || raw.isEmpty) return null;
+
+    try {
+      final jsonMap = jsonDecode(raw) as Map<String, dynamic>;
+      return DraftState.fromJson(
+        jsonMap,
+        fallbackPassingRate: fallbackPassingRate,
+        fallbackAmountDeductionRate: fallbackAmountDeductionRate,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveGroupDraft(String groupId, DraftState state) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      '$_groupDraftPrefix$groupId',
+      jsonEncode(state.toJson()),
+    );
+  }
+
+  Future<void> clearGroupDraft(String groupId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_groupDraftPrefix$groupId');
+  }
+
+  Future<List<HistoryEntry>> loadGroupHistory(String groupId) async {
+    final all = await loadHistory();
+    return all.where((e) => e.groupId == groupId).toList();
+  }
+
+  Future<void> migrateLegacyToDefaultGroup() async {
+    final existing = await loadGroups();
+    if (existing.isNotEmpty) return;
+
+    final settings = await loadSettings();
+    final group = CalculationGroup.create(
+      name: 'My Calculations',
+      passingRate: settings.defaultPassingRate,
+      amountDeductionRate: settings.defaultAmountDeductionRate,
+    );
+    await upsertGroup(group);
+
+    final legacyDraft = await loadDraft(
+      fallbackPassingRate: settings.defaultPassingRate,
+      fallbackAmountDeductionRate: settings.defaultAmountDeductionRate,
+    );
+    if (legacyDraft != null && legacyDraft.hasData) {
+      await saveGroupDraft(
+        group.id,
+        DraftState(
+          title: legacyDraft.title,
+          rows: legacyDraft.rows,
+          passingRate: legacyDraft.passingRate,
+          amountDeductionRate: legacyDraft.amountDeductionRate,
+          lastView: legacyDraft.lastView,
+          historyEntryId: legacyDraft.historyEntryId,
+          updatedAt: legacyDraft.updatedAt,
+          commissionTracking: legacyDraft.commissionTracking,
+          groupId: group.id,
+        ),
+      );
+      await clearDraft();
+    }
+
+    final history = await loadHistory();
+    var migrated = false;
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].groupId == null) {
+        history[i] = history[i].copyWith(groupId: group.id);
+        migrated = true;
+      }
+    }
+    if (migrated) {
+      await saveHistory(history);
+    }
   }
 }

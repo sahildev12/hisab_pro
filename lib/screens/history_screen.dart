@@ -44,12 +44,14 @@ class HistoryScreen extends StatefulWidget {
     required this.onEditEntry,
     this.onDeleteEntry,
     this.onStartNewCalculation,
+    this.groupIdFilter,
   });
 
   final StorageService storage;
   final ValueChanged<HistoryEntry> onEditEntry;
   final ValueChanged<String>? onDeleteEntry;
   final VoidCallback? onStartNewCalculation;
+  final String? groupIdFilter;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -80,8 +82,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _load() async {
-    final history = await widget.storage.loadHistory();
-    final draftEntry = await widget.storage.loadActiveDraftEntry();
+    var history = await widget.storage.loadHistory();
+    if (widget.groupIdFilter != null) {
+      history =
+          history.where((e) => e.groupId == widget.groupIdFilter).toList();
+    }
+    HistoryEntry? draftEntry;
+    if (widget.groupIdFilter == null) {
+      draftEntry = await widget.storage.loadActiveDraftEntry();
+    } else {
+      final groupDraft = await widget.storage.loadGroupDraft(
+        widget.groupIdFilter!,
+      );
+      if (groupDraft != null && groupDraft.hasData) {
+        draftEntry = groupDraft.toHistoryEntry(
+          id: groupDraft.historyEntryId ?? HistoryEntry.activeDraftId,
+          status: groupDraft.lastView == 'results'
+              ? HistoryEntry.completedStatus
+              : HistoryEntry.draftStatus,
+          savedAt: groupDraft.updatedAt ?? DateTime.now(),
+          updatedAt: groupDraft.updatedAt,
+          groupId: widget.groupIdFilter,
+        );
+      }
+    }
     final header = await widget.storage.loadPersistentHeader();
     if (!mounted) return;
     setState(() {
@@ -123,7 +147,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (confirmed != true) return;
 
     if (item.isDraft) {
-      await widget.storage.clearDraft();
+      if (widget.groupIdFilter != null) {
+        await widget.storage.clearGroupDraft(widget.groupIdFilter!);
+      } else {
+        await widget.storage.clearDraft();
+      }
     }
     await widget.storage.deleteFromHistory(item.entry.id);
     widget.onDeleteEntry?.call(item.entry.id);

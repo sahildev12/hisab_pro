@@ -1,0 +1,12 @@
+{
+  "dart.flutterSdkPath": "d:\\project\\hisab_pro\\flutter",
+  "dart.env": {
+    "ANDROID_HOME": "C:\\Users\\SHINCHAN\\AppData\\Local\\Android\\sdk",
+    "ANDROID_SDK_ROOT": "C:\\Users\\SHINCHAN\\AppData\\Local\\Android\\sdk"
+  },
+  "dart.flutterRunAdditionalArgs": [
+    "-d",
+    "RZCY824Z7VN"
+  ],
+  "dart.flutterSelectDeviceWhenConnected": true
+}

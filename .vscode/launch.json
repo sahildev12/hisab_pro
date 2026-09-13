@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "HisabPro (Samsung SM S721B)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "RZCY824Z7VN"
+    },
+    {
+      "name": "HisabPro (profile)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "profile",
+      "deviceId": "RZCY824Z7VN"
+    },
+    {
+      "name": "HisabPro (release)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "release",
+      "deviceId": "RZCY824Z7VN"
+    }
+  ]
+}

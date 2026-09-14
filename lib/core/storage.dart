@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/calculation_group.dart';
 import '../models/history_entry.dart';
+import '../models/paste_recent_entry.dart';
 import '../models/row_data.dart';
 import 'calculate.dart' as calc;
 import 'money.dart';
@@ -18,6 +19,8 @@ const _commissionBalancesKey = 'hisabpro-commission-balances';
 const _groupsKey = 'hisabpro-groups';
 const _groupDraftPrefix = 'hisabpro-group-draft-';
 const _pasteCalculationDraftKey = 'hisabpro-paste-calculation-draft';
+const _pasteRecentsKey = 'hisabpro-paste-recents';
+const pasteRecentLimit = 25;
 const historyRetentionDays = 35;
 
 class AppSettings {
@@ -321,6 +324,68 @@ class StorageService {
   Future<void> clearPasteCalculationDraft() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pasteCalculationDraftKey);
+  }
+
+  Future<List<PasteRecentEntry>> loadPasteRecents() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_pasteRecentsKey);
+    if (raw == null || raw.isEmpty) return [];
+
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map(
+            (item) => PasteRecentEntry.fromJson(item as Map<String, dynamic>),
+          )
+          .toList()
+        ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _savePasteRecents(List<PasteRecentEntry> entries) async {
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = entries.map((entry) => entry.toJson()).toList();
+    await prefs.setString(_pasteRecentsKey, jsonEncode(encoded));
+  }
+
+  Future<void> addPasteRecent({
+    required String text,
+    String title = '',
+  }) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    final entries = await loadPasteRecents();
+    entries.removeWhere((entry) => entry.text.trim() == trimmed);
+
+    entries.insert(
+      0,
+      PasteRecentEntry(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        text: text,
+        title: title.trim(),
+        savedAt: DateTime.now(),
+      ),
+    );
+
+    if (entries.length > pasteRecentLimit) {
+      entries.removeRange(pasteRecentLimit, entries.length);
+    }
+
+    await _savePasteRecents(entries);
+  }
+
+  Future<void> deletePasteRecent(String id) async {
+    final entries = await loadPasteRecents();
+    entries.removeWhere((entry) => entry.id == id);
+    await _savePasteRecents(entries);
+  }
+
+  Future<void> clearPasteRecents() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_pasteRecentsKey);
   }
 
   Future<List<HistoryEntry>> loadHistory() async {

@@ -16,6 +16,7 @@ class GroupStaticRowTable extends StatelessWidget {
     required this.onAddRow,
     required this.onAddCustomEntry,
     required this.onReorder,
+    this.onReset,
     this.errorRowIndex,
     this.canAddRow = true,
   });
@@ -26,6 +27,7 @@ class GroupStaticRowTable extends StatelessWidget {
   final VoidCallback onAddRow;
   final VoidCallback onAddCustomEntry;
   final void Function(int oldIndex, int newIndex) onReorder;
+  final VoidCallback? onReset;
   final int? errorRowIndex;
   final bool canAddRow;
 
@@ -53,6 +55,28 @@ class GroupStaticRowTable extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                if (onReset != null) ...[
+                  TextButton(
+                    onPressed: onReset,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      foregroundColor: AppColors.secondaryText,
+                    ),
+                    child: Text(
+                      'Reset',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Text(
                   '$_activeCount rows',
                   style: GoogleFonts.inter(
@@ -88,64 +112,76 @@ class GroupStaticRowTable extends StatelessWidget {
               );
             },
           ),
-          Material(
-            color: AppColors.lightBlue,
-            child: InkWell(
-              onTap: canAddRow ? onAddRow : null,
-              child: SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.add,
-                      size: 18,
-                      color: canAddRow ? AppColors.primaryBlue : AppColors.stone,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Add Row',
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color:
-                            canAddRow ? AppColors.primaryBlue : AppColors.stone,
+          Row(
+            children: [
+              Expanded(
+                child: Material(
+                  color: AppColors.lightBlue,
+                  child: InkWell(
+                    onTap: canAddRow ? onAddRow : null,
+                    child: SizedBox(
+                      height: 42,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.add,
+                            size: 16,
+                            color: canAddRow
+                                ? AppColors.primaryBlue
+                                : AppColors.stone,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Add Row',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: canAddRow
+                                  ? AppColors.primaryBlue
+                                  : AppColors.stone,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
-          Material(
-            color: AppColors.surfaceSoft,
-            child: InkWell(
-              onTap: onAddCustomEntry,
-              child: SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.edit_outlined,
-                      size: 18,
-                      color: AppColors.primaryBlue,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Add Custom Name',
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primaryBlue,
+              Expanded(
+                child: Material(
+                  color: AppColors.surfaceSoft,
+                  child: InkWell(
+                    onTap: onAddCustomEntry,
+                    child: SizedBox(
+                      height: 42,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.edit_outlined,
+                            size: 16,
+                            color: AppColors.primaryBlue,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              'Custom Name',
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primaryBlue,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),

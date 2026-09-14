@@ -1,7 +1,6 @@
 import 'package:decimal/decimal.dart';
 
 import '../models/row_data.dart';
-import 'money.dart';
 import 'parse_number.dart';
 
 /// A single parse error tied to a source line.
@@ -38,14 +37,23 @@ class SmartParseResult {
 
 /// Parses WhatsApp-style calculation messages into structured data.
 class SmartTextParser {
-  static final _entryPattern = RegExp(
-    r'^\s*([A-Za-z]{1,6})\.?\s+([\d,]+)\s*\(\s*([\d.,]+)\s*\)\s*$',
+  static final _numericTokenPattern = RegExp(
+    r'(?:\d[\d,]*(?:\.\d+)?|\.\d+)\.?',
+  );
+
+  /// Short entry codes use a trailing dot (Sb.) or 1–3 letters before the amount.
+  static final _entryNamePrefix = RegExp(
+    r'^(?:[A-Za-z]{1,6}\.\s+|[A-Za-z]{1,3}\s+\d)',
     caseSensitive: false,
   );
 
-  static final _ratePattern = RegExp(r'(\d+)\s*%\s*(\d+)\s*$');
+  static final _rateEndPattern = RegExp(
+    r'(\d{1,3})\s*[%/\-_&$#:,]?\s*(\d{1,3})\s*\.?\s*$',
+  );
 
-  static final _noisePattern = RegExp(r'^[\s*._\-=]+|[\s*._\-=]+$');
+  static final _datePattern = RegExp(
+    r'^\d{1,2}[-=]\d{1,2}[-=]\d{4}$',
+  );
 
   /// Parse pasted text. Returns errors if any line looks like data but fails.
   static ({
@@ -66,84 +74,40 @@ class SmartTextParser {
 
     for (var i = 0; i < lines.length; i++) {
       final rawLine = lines[i];
-      final line = rawLine.trim();
+      final line = normalizeLine(rawLine);
       final lineNumber = i + 1;
 
       if (line.isEmpty) continue;
       if (_isFormattingOnly(line)) continue;
+      if (_isDateLine(line)) continue;
       if (_isSummaryLine(line)) continue;
 
-      final entryMatch = _entryPattern.firstMatch(line);
-      final rateMatch = _ratePattern.firstMatch(line);
-      if (rateMatch != null) {
-        final passing = int.tryParse(rateMatch.group(1)!);
-        final deduction = int.tryParse(rateMatch.group(2)!);
-        if (passing == null || deduction == null || passing + deduction != 100) {
-          errors.add(SmartParseLineError(
-            lineNumber: lineNumber,
-            lineText: rawLine,
-            message: 'Rate must be like 96%4 (passing + deduction = 100).',
-          ));
-          continue;
-        }
-        passingRate = Decimal.fromInt(passing);
-        amountDeductionRate = Decimal.fromInt(deduction);
-        final titlePart = line.substring(0, rateMatch.start).trim();
-        if (titlePart.isNotEmpty) {
-          title = _cleanTitle(titlePart);
+      final rateLine = _tryParseRateLine(line);
+      if (rateLine != null) {
+        passingRate = Decimal.fromInt(rateLine.passing);
+        amountDeductionRate = Decimal.fromInt(rateLine.deduction);
+        if (rateLine.title.isNotEmpty) {
+          title = rateLine.title;
         }
         continue;
       }
 
-      if (entryMatch != null) {
-        final nameRaw = entryMatch.group(1)!.trim();
-        final amountRaw = entryMatch.group(2)!.trim();
-        final bracketRaw = entryMatch.group(3)!.trim();
-
-        final name = _normalizeEntryName(nameRaw, allowedEntryNames);
-        if (name == null) {
+      if (_hasEntryNamePrefix(line)) {
+        final entry = _tryParseEntryLine(line, allowedEntryNames);
+        if (entry.error != null) {
           errors.add(SmartParseLineError(
             lineNumber: lineNumber,
             lineText: rawLine,
-            message: 'Entry name "$nameRaw" is not recognized.',
+            message: entry.error!,
           ));
           continue;
         }
-
-        if (tryParseDecimal(amountRaw) == null) {
-          errors.add(SmartParseLineError(
-            lineNumber: lineNumber,
-            lineText: rawLine,
-            message: 'Amount is invalid.',
+        if (entry.row != null) {
+          rows.add(entry.row!.copyWith(
+            id: '${DateTime.now().microsecondsSinceEpoch}-$rowIndex',
           ));
-          continue;
+          rowIndex++;
         }
-
-        if (tryParseDecimal(bracketRaw) == null) {
-          errors.add(SmartParseLineError(
-            lineNumber: lineNumber,
-            lineText: rawLine,
-            message: 'Bracket is invalid.',
-          ));
-          continue;
-        }
-
-        rows.add(RowData(
-          id: '${DateTime.now().microsecondsSinceEpoch}-$rowIndex',
-          name: name,
-          amount: amountRaw.replaceAll(',', ''),
-          bracket: bracketRaw,
-        ));
-        rowIndex++;
-        continue;
-      }
-
-      if (_looksLikePartialEntry(line)) {
-        errors.add(SmartParseLineError(
-          lineNumber: lineNumber,
-          lineText: rawLine,
-          message: _partialEntryMessage(line),
-        ));
         continue;
       }
 
@@ -152,8 +116,12 @@ class SmartTextParser {
         continue;
       }
 
-      if (rows.isEmpty) {
-        title = title.isEmpty ? _cleanTitle(line) : '$title $line'.trim();
+      if (_looksLikeDataLine(line)) {
+        errors.add(SmartParseLineError(
+          lineNumber: lineNumber,
+          lineText: rawLine,
+          message: 'Could not understand this line.',
+        ));
       }
     }
 
@@ -168,7 +136,7 @@ class SmartTextParser {
           const SmartParseLineError(
             lineNumber: 1,
             lineText: '',
-            message: 'No entries found. Use format: Sb. 6995 (30)',
+            message: 'No entries found. Paste lines like: Sb. 6781 45',
           ),
         ],
       );
@@ -186,35 +154,207 @@ class SmartTextParser {
     );
   }
 
+  /// Normalize a single line for parsing (tabs, spaces, WhatsApp bold).
+  static String normalizeLine(String raw) {
+    var line = raw.replaceAll('\t', ' ').trim();
+    line = stripWhatsAppFormatting(line);
+    line = line.replaceAll(RegExp(r'\s+'), ' ');
+    return line;
+  }
+
+  /// Remove leading/trailing WhatsApp bold markers.
+  static String stripWhatsAppFormatting(String line) {
+    return line.replaceAll(RegExp(r'^\*+|\*+$'), '').trim();
+  }
+
+  /// Normalize a numeric token (commas, parens, trailing punctuation dots).
+  static String? normalizeNumericToken(String raw) {
+    var token = raw.replaceAll(',', '').trim();
+    if (token.startsWith('(') && token.endsWith(')')) {
+      token = token.substring(1, token.length - 1).trim();
+    }
+
+    while (token.endsWith('.') && token.length > 1) {
+      final without = token.substring(0, token.length - 1);
+      if (tryParseDecimal(without) != null) {
+        token = without;
+      } else {
+        break;
+      }
+    }
+
+    if (tryParseDecimal(token) == null) {
+      return null;
+    }
+    return token;
+  }
+
+  static List<String> extractNumericTokens(String line) {
+    final expanded = line.replaceAllMapped(
+      RegExp(r'\(\s*([^)]+)\s*\)'),
+      (match) => ' ${match.group(1)!} ',
+    );
+
+    final tokens = <String>[];
+    for (final match in _numericTokenPattern.allMatches(expanded)) {
+      final normalized = normalizeNumericToken(match.group(0)!);
+      if (normalized != null) {
+        tokens.add(normalized);
+      }
+    }
+    return tokens;
+  }
+
+  static ({
+    String title,
+    int passing,
+    int deduction,
+  })? _tryParseRateLine(String line) {
+    if (_hasEntryNamePrefix(line)) {
+      return null;
+    }
+
+    final match = _rateEndPattern.firstMatch(line);
+    if (match == null) return null;
+
+    final passing = int.tryParse(match.group(1)!);
+    final deduction = int.tryParse(match.group(2)!);
+    if (passing == null || deduction == null) return null;
+    if (passing > 100 || deduction > 100) return null;
+
+    final titlePart = line.substring(0, match.start).trim();
+    return (
+      title: _cleanTitle(titlePart),
+      passing: passing,
+      deduction: deduction,
+    );
+  }
+
+  static ({
+    RowData? row,
+    String? error,
+  }) _tryParseEntryLine(
+    String line,
+    List<String> allowedEntryNames,
+  ) {
+    final nameMatch = RegExp(r'^([A-Za-z]{1,6}\.?)\s+(.*)$').firstMatch(line);
+    final entryLabel = nameMatch?.group(1) ?? 'this entry';
+    final remainder = nameMatch?.group(2) ?? line;
+
+    final firstNumeric = _numericTokenPattern.firstMatch(remainder);
+    if (firstNumeric != null) {
+      final beforeAmount = remainder.substring(0, firstNumeric.start).trim();
+      if (beforeAmount.isNotEmpty &&
+          RegExp(r'[A-Za-z]').hasMatch(beforeAmount)) {
+        return (
+          row: null,
+          error: 'Amount is invalid for $entryLabel.',
+        );
+      }
+    }
+
+    final numericTokens = extractNumericTokens(line);
+    if (numericTokens.isEmpty) {
+      return (row: null, error: 'Amount is invalid for $entryLabel.');
+    }
+    if (numericTokens.length < 2) {
+      final name = _extractEntryName(line, numericTokens);
+      final label = name ?? entryLabel;
+      return (
+        row: null,
+        error: 'Bracket / passing value is missing for $label.',
+      );
+    }
+
+    final amountRaw = numericTokens[0];
+    final bracketRaw = numericTokens[1];
+    final nameRaw = _extractEntryName(line, numericTokens);
+    if (nameRaw == null || nameRaw.isEmpty) {
+      return (row: null, error: 'Entry name is missing.');
+    }
+
+    final name = _normalizeEntryName(nameRaw, allowedEntryNames);
+    if (name == null) {
+      return (
+        row: null,
+        error: 'Entry name "$nameRaw" is not recognized.',
+      );
+    }
+
+    if (tryParseDecimal(amountRaw) == null) {
+      return (row: null, error: 'Amount is invalid for $name.');
+    }
+
+    if (tryParseDecimal(bracketRaw) == null) {
+      return (
+        row: null,
+        error: 'Bracket / passing value is invalid for $name.',
+      );
+    }
+
+    return (
+      row: RowData(
+        id: '',
+        name: name,
+        amount: amountRaw,
+        bracket: bracketRaw,
+      ),
+      error: null,
+    );
+  }
+
+  static String? _extractEntryName(
+    String line,
+    List<String> numericTokens,
+  ) {
+    final expanded = line.replaceAllMapped(
+      RegExp(r'\(\s*([^)]+)\s*\)'),
+      (match) => ' ${match.group(1)!} ',
+    );
+
+    final firstMatch = _numericTokenPattern.firstMatch(expanded);
+    if (firstMatch == null) {
+      return expanded.trim().isEmpty ? null : expanded.trim();
+    }
+
+    final namePart = expanded.substring(0, firstMatch.start).trim();
+    if (namePart.isEmpty) return null;
+    return namePart;
+  }
+
+  static bool _hasEntryNamePrefix(String line) {
+    return _entryNamePrefix.hasMatch(line);
+  }
+
   static String? _normalizeEntryName(
     String raw,
     List<String> allowedEntryNames,
   ) {
-    final withDot = raw.endsWith('.') ? raw : '$raw.';
-    final upper = withDot.substring(0, withDot.length - 1).toUpperCase();
-    final candidate = '$upper.';
+    final trimmed = raw.trim();
+    final withoutTrailingDot =
+        trimmed.endsWith('.') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    final withDot = '$withoutTrailingDot.';
 
     for (final allowed in allowedEntryNames) {
       final normalized = allowed.trim();
-      if (normalized.toLowerCase() == candidate.toLowerCase()) {
-        return normalized.endsWith('.') ? normalized : '$normalized.';
-      }
-      if (normalized.toLowerCase() == raw.toLowerCase()) {
+      final allowedBase = normalized.endsWith('.')
+          ? normalized.substring(0, normalized.length - 1)
+          : normalized;
+      if (allowedBase.toLowerCase() == withoutTrailingDot.toLowerCase()) {
         return normalized.endsWith('.') ? normalized : '$normalized.';
       }
     }
 
     if (allowedEntryNames.isEmpty) {
-      return candidate;
+      return withDot;
     }
 
     return null;
   }
 
   static String _cleanTitle(String line) {
-    return line
-        .replaceAll(RegExp(r'^\*+|\*+$'), '')
-        .replaceAll(_noisePattern, '')
+    return stripWhatsAppFormatting(line)
+        .replaceAll(RegExp(r'^[\s._\-=]+|[\s._\-=]+$'), '')
         .trim();
   }
 
@@ -223,31 +363,32 @@ class SmartTextParser {
     return stripped.isEmpty;
   }
 
+  static bool _isDateLine(String line) {
+    return _datePattern.hasMatch(line);
+  }
+
   static bool _isSummaryLine(String line) {
     final upper = line.toUpperCase();
-    return upper.startsWith('TOTAL') ||
+    if (upper.startsWith('TOTAL') ||
         upper.startsWith('PASSING') ||
         upper.startsWith('COMMISSION') ||
         upper.contains('LENE AAJ') ||
         upper.contains('DENE AAJ') ||
-        upper.contains('BARABAR');
+        upper.contains('BARABAR')) {
+      return true;
+    }
+
+    if (RegExp(r'\d+\s*[-×x*]\s*\d+\s*=').hasMatch(line)) {
+      return true;
+    }
+
+    return false;
   }
 
-  static bool _looksLikePartialEntry(String line) {
-    final hasParen = line.contains('(');
+  static bool _looksLikeDataLine(String line) {
     final hasLetters = RegExp(r'[A-Za-z]').hasMatch(line);
     final hasDigits = RegExp(r'\d').hasMatch(line);
-    return hasLetters && hasDigits || hasParen;
-  }
-
-  static String _partialEntryMessage(String line) {
-    if (!line.contains('(')) {
-      return 'Bracket is missing.';
-    }
-    if (!RegExp(r'\d').hasMatch(line)) {
-      return 'Amount is invalid.';
-    }
-    return 'Could not understand this line.';
+    return hasLetters && hasDigits;
   }
 
   /// Fuzzy match group name against parsed title.

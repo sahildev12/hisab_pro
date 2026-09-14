@@ -6,12 +6,18 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/calculate.dart';
 import '../core/commission.dart';
 import '../core/copy_message.dart';
+import '../core/format.dart';
+import '../core/money.dart';
+import '../core/parse_number.dart';
 import '../core/smart_text_parser.dart';
 import '../core/storage.dart';
 import '../core/validate.dart';
 import '../models/calculation_group.dart';
 import '../models/calculation_result.dart';
+import '../models/paste_recent_entry.dart';
+import '../models/row_data.dart';
 import '../theme/app_theme.dart';
+import '../widgets/hisab_pro_modal.dart';
 import '../widgets/paste_result_summary.dart';
 
 class SmartCalculatorScreen extends StatefulWidget {
@@ -163,6 +169,13 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     );
 
     if (!mounted) return;
+
+    if (!silent) {
+      await widget.storage.addPasteRecent(
+        text: _textController.text,
+        title: parsed.title,
+      );
+    }
     setState(() {
       _parsed = parsed;
       _result = result;
@@ -172,6 +185,167 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     if (!silent) {
       widget.onComplete?.call();
     }
+  }
+
+  Future<void> _loadRecent(PasteRecentEntry entry) async {
+    _textController.text = entry.text;
+    await widget.storage.savePasteCalculationDraft(entry.text);
+    if (!mounted) return;
+    Navigator.pop(context);
+    await _parseAndCalculate();
+  }
+
+  Future<void> _openRecents() async {
+    var recents = await widget.storage.loadPasteRecents();
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Recent',
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primaryText,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (recents.isNotEmpty)
+                          TextButton(
+                            onPressed: () async {
+                              final confirmed =
+                                  await showHisabProConfirmDialog(
+                                context: context,
+                                title: 'Clear all recent?',
+                                message:
+                                    'This will remove all saved paste calculations from Recent.',
+                                confirmLabel: 'Clear all',
+                                destructive: true,
+                              );
+                              if (confirmed != true) return;
+                              await widget.storage.clearPasteRecents();
+                              recents = [];
+                              setSheetState(() {});
+                            },
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppColors.danger,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                            ),
+                            child: Text(
+                              'Clear all',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (recents.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Text(
+                          'No recent paste calculations yet.',
+                          textAlign: TextAlign.center,
+                          style:
+                              GoogleFonts.inter(color: AppColors.secondaryText),
+                        ),
+                      )
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: recents.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final entry = recents[index];
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(
+                                entry.title.isNotEmpty
+                                    ? entry.title
+                                    : entry.preview,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${formatHistoryCardDate(entry.savedAt)} • ${entry.preview}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: AppColors.secondaryText,
+                                ),
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: AppColors.danger,
+                                  size: 20,
+                                ),
+                                onPressed: () async {
+                                  await widget.storage
+                                      .deletePasteRecent(entry.id);
+                                  recents =
+                                      await widget.storage.loadPasteRecents();
+                                  setSheetState(() {});
+                                },
+                              ),
+                              onTap: () => _loadRecent(entry),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Decimal _sumAmounts(List<RowData> rows) {
+    return rows.fold(
+      Decimal.zero,
+      (sum, row) => sum + (tryParseDecimal(row.amount) ?? Decimal.zero),
+    );
+  }
+
+  Decimal _sumBrackets(List<RowData> rows) {
+    return rows.fold(
+      Decimal.zero,
+      (sum, row) => sum + (tryParseDecimal(row.bracket) ?? Decimal.zero),
+    );
   }
 
   String? get _copyMessage {
@@ -199,6 +373,76 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     );
   }
 
+  Widget _buildPreviewCard() {
+    if (_parsed == null) return const SizedBox.shrink();
+
+    final rates = _resolveRates(_parsed!);
+    final totalAmount = _sumAmounts(_parsed!.rows);
+    final totalPassing = _sumBrackets(_parsed!.rows);
+    final entryCount = _parsed!.rows.length;
+    final deductionAmount = _result?.commissionEarned ??
+        roundMoney(percentOf(totalAmount, rates.amountDeductionRate));
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.successLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.check_circle, color: AppColors.success, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                '$entryCount entries detected',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.success,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _previewRow('Passing', formatPlainNumber(rates.passingRate)),
+          _previewRow('Deduction', formatRate(rates.amountDeductionRate)),
+          _previewRow(
+            'Deduction amount',
+            formatMoney(deductionAmount, showCurrency: true),
+          ),
+          _previewRow('Total Amount', formatMoney(totalAmount, showCurrency: true)),
+          _previewRow('Total passing', formatBracket(totalPassing)),
+        ],
+      ),
+    );
+  }
+
+  Widget _previewRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Text(
+            '$label:',
+            style: GoogleFonts.inter(color: AppColors.secondaryText),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.w600,
+              color: AppColors.primaryText,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -208,6 +452,13 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.primaryText,
         elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Recent',
+            onPressed: _openRecents,
+            icon: const Icon(Icons.history_rounded),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.pagePadding),
@@ -281,9 +532,28 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                 ),
               ),
             ],
+            _buildPreviewCard(),
             if (_result != null) ...[
               const SizedBox(height: 16),
-              PasteResultSummary(result: _result!),
+              Stack(
+                children: [
+                  PasteResultSummary(result: _result!),
+                  if (_copyMessage != null)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: IconButton(
+                        tooltip: 'Copy',
+                        onPressed: _copyResult,
+                        icon: const Icon(
+                          Icons.copy_outlined,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ],
             const SizedBox(height: 20),
             FilledButton(
@@ -303,17 +573,6 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                     )
                   : const Text('Calculate'),
             ),
-            if (_copyMessage != null) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _copyResult,
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
-                ),
-                icon: const Icon(Icons.copy_outlined, size: 18),
-                label: const Text('Copy'),
-              ),
-            ],
             const SizedBox(height: 8),
             OutlinedButton(
               onPressed: _reset,

@@ -73,6 +73,30 @@ void main() {
     expect(smart.passing, manual.passing);
   });
 
+  test('parses Ankit title with date and entries without brackets', () {
+    const names = ['Db.', 'Sg.', 'Fb.', 'Gb.', 'Gl.'];
+    final output = SmartTextParser.parse(
+      '''
+*15-09=2026*
+
+*Ankit 95%5*
+
+Db.  775  ( 6 )
+Sg.  175  ( 0 )
+Fb.  2215  ( 34 )
+Gb.  2682  ( 20 )
+Gl.  905  ( 6 )
+''',
+      allowedEntryNames: names,
+    );
+
+    expect(output.errors, isEmpty);
+    expect(output.result!.title.toLowerCase(), contains('ankit'));
+    expect(output.result!.passingRate, Decimal.fromInt(95));
+    expect(output.result!.amountDeductionRate, Decimal.fromInt(5));
+    expect(output.result!.rows.length, 5);
+  });
+
   test('reports error for invalid entry line', () {
     final output = SmartTextParser.parse(
       'Test 96%4\nSb. abc (30)',

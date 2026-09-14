@@ -500,6 +500,18 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     await _startFreshCalculation();
   }
 
+  Future<void> _resetSession() async {
+    final confirmed = await showHisabProConfirmDialog(
+      context: context,
+      title: 'Reset entries?',
+      message: 'This will clear all amounts and brackets in this session.',
+      confirmLabel: 'Reset',
+      destructive: true,
+    );
+    if (confirmed != true) return;
+    await _startFreshCalculation();
+  }
+
   Future<void> _clearDraft() async {
     final confirmed = await showHisabProConfirmDialog(
       context: context,
@@ -653,6 +665,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                 onAddRow: _addRow,
                 onAddCustomEntry: _addCustomEntry,
                 onReorder: _onReorder,
+                onReset: _resetSession,
                 errorRowIndex: _errorRowIndex,
                 canAddRow: canAddRow,
               ),
@@ -690,22 +703,32 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
               ),
               if (_copyMessage != null) ...[
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _copyResult,
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
-                  ),
-                  icon: const Icon(Icons.copy_outlined, size: 18),
-                  label: const Text('Copy'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _shareResult,
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
-                  ),
-                  icon: const Icon(Icons.share_outlined, size: 18),
-                  label: const Text('Share'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _copyResult,
+                        style: OutlinedButton.styleFrom(
+                          minimumSize:
+                              const Size.fromHeight(AppSpacing.buttonHeight),
+                        ),
+                        icon: const Icon(Icons.copy_outlined, size: 18),
+                        label: const Text('Copy'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _shareResult,
+                        style: OutlinedButton.styleFrom(
+                          minimumSize:
+                              const Size.fromHeight(AppSpacing.buttonHeight),
+                        ),
+                        icon: const Icon(Icons.share_outlined, size: 18),
+                        label: const Text('Share'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],

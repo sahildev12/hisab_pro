@@ -2,13 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/storage.dart';
-import '../models/history_entry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/hisab_page_header.dart';
 import 'calculation_defaults_screen.dart';
 import 'entry_names_screen.dart';
-import 'history_screen.dart';
-import '../widgets/total_commission_modal.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -16,15 +13,11 @@ class SettingsScreen extends StatefulWidget {
     required this.storage,
     required this.settings,
     required this.onSettingsChanged,
-    required this.onOpenHistoryEntry,
-    this.onDeleteHistoryEntry,
   });
 
   final StorageService storage;
   final AppSettings settings;
   final ValueChanged<AppSettings> onSettingsChanged;
-  final ValueChanged<HistoryEntry> onOpenHistoryEntry;
-  final ValueChanged<String>? onDeleteHistoryEntry;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -90,18 +83,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           _SettingsTile(
-            icon: Icons.payments_outlined,
-            title: 'Total Commission',
-            subtitle: 'View saved commission balances',
-            onTap: () => showTotalCommissionModal(
-              context: context,
-              storage: widget.storage,
-            ),
-          ),
-          _SettingsTile(
             icon: Icons.tune_outlined,
             title: 'Calculation Defaults',
-            subtitle: 'Passing, deduction & commission defaults',
+            subtitle: 'Default passing and deduction rates',
             onTap: () async {
               final updated = await Navigator.push<AppSettings>(
                 context,
@@ -114,23 +98,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (updated != null) {
                 await _applySettings(updated);
               }
-            },
-          ),
-          _SettingsTile(
-            icon: Icons.history_outlined,
-            title: 'History',
-            subtitle: 'View saved calculations',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => HistoryScreen(
-                    storage: widget.storage,
-                    onEditEntry: widget.onOpenHistoryEntry,
-                    onDeleteEntry: widget.onDeleteHistoryEntry,
-                  ),
-                ),
-              );
             },
           ),
           const SizedBox(height: 20),

@@ -113,6 +113,17 @@ class HisabHeaderIconButton extends StatelessWidget {
   }
 }
 
+RelativeRect hisabMenuPosition(BuildContext buttonContext) {
+  final renderBox = buttonContext.findRenderObject()! as RenderBox;
+  final offset = renderBox.localToGlobal(Offset.zero);
+  return RelativeRect.fromLTRB(
+    offset.dx,
+    offset.dy + renderBox.size.height,
+    offset.dx + renderBox.size.width,
+    offset.dy,
+  );
+}
+
 Future<void> showHisabHeaderMenu({
   required BuildContext context,
   required RelativeRect position,

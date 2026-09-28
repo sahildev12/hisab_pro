@@ -14,6 +14,7 @@ class CalculationGroup {
     required this.updatedAt,
     this.avatarColorValue,
     this.historyEntryIds = const [],
+    this.commissionEnabled = false,
   });
 
   final String id;
@@ -24,6 +25,7 @@ class CalculationGroup {
   final DateTime updatedAt;
   final int? avatarColorValue;
   final List<String> historyEntryIds;
+  final bool commissionEnabled;
 
   CalculationGroup copyWith({
     String? id,
@@ -34,6 +36,7 @@ class CalculationGroup {
     DateTime? updatedAt,
     int? avatarColorValue,
     List<String>? historyEntryIds,
+    bool? commissionEnabled,
   }) {
     return CalculationGroup(
       id: id ?? this.id,
@@ -45,6 +48,7 @@ class CalculationGroup {
       updatedAt: updatedAt ?? this.updatedAt,
       avatarColorValue: avatarColorValue ?? this.avatarColorValue,
       historyEntryIds: historyEntryIds ?? this.historyEntryIds,
+      commissionEnabled: commissionEnabled ?? this.commissionEnabled,
     );
   }
 
@@ -57,6 +61,7 @@ class CalculationGroup {
         'updatedAt': updatedAt.toIso8601String(),
         if (avatarColorValue != null) 'avatarColorValue': avatarColorValue,
         if (historyEntryIds.isNotEmpty) 'historyEntryIds': historyEntryIds,
+        'commissionEnabled': commissionEnabled,
       };
 
   factory CalculationGroup.fromJson(Map<String, dynamic> json) {
@@ -73,6 +78,7 @@ class CalculationGroup {
       updatedAt: DateTime.parse(json['updatedAt'] as String),
       avatarColorValue: json['avatarColorValue'] as int?,
       historyEntryIds: rawHistory.map((id) => id.toString()).toList(),
+      commissionEnabled: json['commissionEnabled'] as bool? ?? false,
     );
   }
 
@@ -80,6 +86,7 @@ class CalculationGroup {
     required String name,
     Decimal? passingRate,
     Decimal? amountDeductionRate,
+    bool commissionEnabled = false,
   }) {
     final now = DateTime.now();
     final passing = passingRate ?? calc.defaultPassingRate;
@@ -92,6 +99,7 @@ class CalculationGroup {
       createdAt: now,
       updatedAt: now,
       avatarColorValue: _colorForName(name),
+      commissionEnabled: commissionEnabled,
     );
   }
 

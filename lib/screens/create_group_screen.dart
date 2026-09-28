@@ -29,6 +29,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   late final TextEditingController _passingController;
   late final TextEditingController _deductionController;
   bool _linked = true;
+  bool _commissionEnabled = false;
   String? _error;
 
   bool get _isEdit => widget.initialGroup != null;
@@ -50,6 +51,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     _linked = group == null ||
         group.amountDeductionRate ==
             suggestedAmountDeduction(group.passingRate);
+    _commissionEnabled = group?.commissionEnabled ?? false;
   }
 
   @override
@@ -96,11 +98,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           passingRate: passing!,
           amountDeductionRate: deduction!,
           updatedAt: now,
+          commissionEnabled: _commissionEnabled,
         ) ??
         CalculationGroup.create(
           name: name,
           passingRate: passing,
           amountDeductionRate: deduction,
+          commissionEnabled: _commissionEnabled,
         );
 
     await widget.storage.upsertGroup(group);
@@ -171,6 +175,37 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 24),
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: SwitchListTile.adaptive(
+                value: _commissionEnabled,
+                onChanged: (value) =>
+                    setState(() => _commissionEnabled = value),
+                title: Text(
+                  'Commission',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primaryText,
+                  ),
+                ),
+                subtitle: Text(
+                  _commissionEnabled
+                      ? 'Track commission balance for this group'
+                      : 'Deduction still applies; commission balance is hidden',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.secondaryText,
+                  ),
+                ),
+                activeThumbColor: AppColors.primaryBlue,
+                activeTrackColor: AppColors.primaryBlue.withValues(alpha: 0.35),
+              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),

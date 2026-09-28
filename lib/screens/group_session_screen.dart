@@ -1,26 +1,29 @@
+import 'dart:async';
+
 import 'package:decimal/decimal.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../constants/entry_names.dart';
+import '../constants/fixed_names.dart';
 import '../core/calculate.dart';
 import '../core/commission.dart';
 import '../core/copy_message.dart';
+import '../core/custom_entry_usage.dart';
 import '../core/group_commission.dart';
 import '../core/group_rows.dart';
 import '../core/share_message.dart';
 import '../core/smart_text_parser.dart';
 import '../core/storage.dart';
-import '../core/money.dart' show suggestedAmountDeduction;
-import '../core/validate.dart';
 import '../models/calculation_group.dart';
 import '../models/calculation_result.dart';
 import '../models/history_entry.dart';
 import '../models/row_data.dart';
 import '../theme/app_theme.dart';
-import '../widgets/calculation_rates_control.dart';
 import '../widgets/commission_balance_card.dart';
 import '../widgets/group_static_row_table.dart';
+import '../widgets/hisab_page_header.dart';
 import '../widgets/hisab_pro_modal.dart';
 import '../widgets/paste_result_summary.dart';
 import '../widgets/persistent_header_input.dart';
@@ -39,6 +42,7 @@ class GroupSessionScreen extends StatefulWidget {
     this.initialParsed,
     this.originalPastedText,
     this.autoCalculate = false,
+    this.initialHistoryEntry,
   });
 
   final StorageService storage;
@@ -50,12 +54,14 @@ class GroupSessionScreen extends StatefulWidget {
   final SmartParseResult? initialParsed;
   final String? originalPastedText;
   final bool autoCalculate;
+  final HistoryEntry? initialHistoryEntry;
 
   @override
   State<GroupSessionScreen> createState() => _GroupSessionScreenState();
 }
 
-class _GroupSessionScreenState extends State<GroupSessionScreen> {
+class _GroupSessionScreenState extends State<GroupSessionScreen>
+    with WidgetsBindingObserver {
   late CalculationGroup _group;
   late final TextEditingController _persistentHeaderController;
 
@@ -68,16 +74,43 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   Decimal _passingRate = defaultPassingRate;
   Decimal _amountDeductionRate = defaultAmountDeductionRate;
   bool _commissionTracking = false;
-  bool _deductionLinkedToPassing = true;
   Decimal _storedCommissionBalance = Decimal.zero;
   String? _historyEntryId;
+  String? _lastSavedHistoryEntryId;
+  String? _editingHistoryEntryId;
   String? _originalPastedText;
   String? _errorMessage;
   int? _errorRowIndex;
 
+  List<List<RowData>> _undoStack = [];
+  List<List<RowData>> _redoStack = [];
+  Timer? _undoPersistTimer;
+  Timer? _draftSaveTimer;
+  final _customEntryUsage = CustomEntryUsageService();
+
+  /// True when rows changed since the last saved calculation, so the next
+  /// calculation is recorded as a new history entry instead of overwriting.
+  bool _changedSinceCalculation = false;
+
+  bool get _commissionEnabled => _group.commissionEnabled;
+
+  bool get _defaultCommissionTracking => _commissionEnabled;
+
+  bool get _canUndo => _undoStack.isNotEmpty;
+
+  bool get _canRedo => _redoStack.isNotEmpty;
+
+  bool get _isUpdatingHistory => _editingHistoryEntryId != null;
+
+  bool get _hasCalculationInput => _rows.any(
+        (row) =>
+            row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
+      );
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _group = widget.group;
     _persistentHeaderController = TextEditingController();
     _load();
@@ -85,26 +118,144 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _undoPersistTimer?.cancel();
+    _draftSaveTimer?.cancel();
     _saveDraft();
+    _persistUndoHistory();
     _persistentHeaderController.dispose();
     super.dispose();
   }
 
-  List<String> get _allowedEntryNames {
-    final names = <String>{...widget.entryNames};
-    for (final row in _rows) {
-      final name = row.name.trim();
-      if (name.isNotEmpty) names.add(name);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _draftSaveTimer?.cancel();
+      _undoPersistTimer?.cancel();
+      _saveDraft();
+      _persistUndoHistory();
     }
-    return names.toList();
   }
 
+  List<RowData> _cloneRows(List<RowData> rows) =>
+      rows.map((row) => row.copyWith()).toList();
+
+  Future<void> _persistUndoHistory() async {
+    try {
+      await widget.storage.saveGroupUndoHistory(
+        _group.id,
+        undo: _undoStack,
+        redo: _redoStack,
+      );
+    } catch (_) {
+      // Undo history is a convenience; losing it must not break editing.
+    }
+  }
+
+  /// Writing the whole undo history is comparatively expensive, so it is
+  /// batched instead of running on every keystroke.
+  void _scheduleUndoPersist() {
+    _undoPersistTimer?.cancel();
+    _undoPersistTimer = Timer(
+      const Duration(milliseconds: 700),
+      _persistUndoHistory,
+    );
+  }
+
+  /// Records the current rows as one undo step.
+  ///
+  /// Every edit gets its own step, so undo walks back a single digit at a time
+  /// rather than clearing a whole number.
+  void _pushUndoSnapshot() {
+    _undoStack.add(_cloneRows(_rows));
+    if (_undoStack.length > undoHistoryLimit) {
+      _undoStack.removeAt(0);
+    }
+    _redoStack.clear();
+    _scheduleUndoPersist();
+  }
+
+  void _clearUndoHistory() {
+    _undoStack = [];
+    _redoStack = [];
+    _scheduleUndoPersist();
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    final previous = _undoStack.removeLast();
+    _redoStack.add(_cloneRows(_rows));
+    if (_redoStack.length > undoHistoryLimit) {
+      _redoStack.removeAt(0);
+    }
+    _scheduleUndoPersist();
+    _applyRestoredRows(previous);
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    final next = _redoStack.removeLast();
+    _undoStack.add(_cloneRows(_rows));
+    if (_undoStack.length > undoHistoryLimit) {
+      _undoStack.removeAt(0);
+    }
+    _scheduleUndoPersist();
+    _applyRestoredRows(next);
+  }
+
+  void _applyRestoredRows(List<RowData> rows) {
+    setState(() {
+      _rows = rows;
+      _errorMessage = null;
+      _errorRowIndex = null;
+      _markRowsChanged();
+    });
+    _updateLiveResult();
+    _saveDraft();
+  }
+
+  /// Marks the rows as edited since the last calculation.
+  ///
+  /// The previous calculation is already stored in history, so the next one
+  /// must start a new record instead of rewriting it.
+  void _markRowsChanged() {
+    if (_changedSinceCalculation) return;
+    if (_editingHistoryEntryId == null) {
+      _historyEntryId = null;
+    } else {
+      _historyEntryId = _editingHistoryEntryId;
+    }
+    _changedSinceCalculation = true;
+  }
+
+  /// True when the saved draft carries user work worth restoring.
+  bool _draftHasWork(DraftState draft) {
+    if (draft.rows.isEmpty) return false;
+    if (draft.lastView == 'results') return true;
+
+    final hasTypedData = draft.rows.any(
+      (row) =>
+          row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
+    );
+    if (hasTypedData) return true;
+
+    final defaultNames = fixedNames.toSet();
+    if (draft.rows.length != fixedNames.length) return true;
+    if (draft.rows.any((row) => !defaultNames.contains(row.name.trim()))) {
+      return true;
+    }
+
+    final draftNames = draft.rows.map((row) => row.name.trim()).toList();
+    return !listEquals(draftNames, fixedNames);
+  }
+
+  /// Rates always come from the group definition; they are not editable here.
   void _syncGroupMeta() {
     _title = _group.name;
     _passingRate = _group.passingRate;
     _amountDeductionRate = _group.amountDeductionRate;
-    _deductionLinkedToPassing =
-        _amountDeductionRate == suggestedAmountDeduction(_passingRate);
   }
 
   Future<void> _load() async {
@@ -119,6 +270,26 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
 
     _syncGroupMeta();
 
+    if (widget.initialHistoryEntry != null) {
+      final entry = widget.initialHistoryEntry!;
+      _rows = restoreGroupRows(entry.rows, _group.id);
+      _passingRate = entry.passingRate;
+      _amountDeductionRate = entry.amountDeductionRate;
+      _commissionTracking =
+          _commissionEnabled ? entry.commissionTracking : false;
+      _historyEntryId = entry.id;
+      _editingHistoryEntryId = entry.id;
+      _originalPastedText = entry.originalPastedText;
+      _changedSinceCalculation = false;
+      await widget.storage.clearGroupUndoHistory(_group.id);
+      await _refreshCommissionBalance();
+      if (mounted) {
+        setState(() => _loading = false);
+        _updateLiveResult();
+      }
+      return;
+    }
+
     if (widget.initialParsed != null) {
       final parsed = widget.initialParsed!;
       final rates = SmartTextParser.resolveRates(
@@ -131,46 +302,40 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
       _amountDeductionRate = rates.amountDeductionRate;
       _originalPastedText =
           widget.originalPastedText ?? parsed.originalText;
-      _commissionTracking = widget.settings.defaultCommissionTracking;
-      _loading = false;
-      setState(() {});
-      if (widget.autoCalculate) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _calculate());
+      _commissionTracking = _defaultCommissionTracking;
+      _changedSinceCalculation = true;
+      await _refreshCommissionBalance();
+      if (mounted) {
+        setState(() => _loading = false);
+        if (widget.autoCalculate) _updateLiveResult();
       }
       return;
     }
 
-    if (draft != null && draft.hasData) {
+    if (draft != null && _draftHasWork(draft)) {
       _rows = restoreGroupRows(draft.rows, _group.id);
-      _commissionTracking = draft.commissionTracking;
+      _commissionTracking =
+          _commissionEnabled ? draft.commissionTracking : false;
       _historyEntryId = draft.historyEntryId;
+      _editingHistoryEntryId = draft.historyEntryId;
       _originalPastedText = draft.originalPastedText;
-      _restoreResultFromDraft(draft);
+      _changedSinceCalculation = draft.historyEntryId == null;
+
+      // Undo and redo steps are stored with the draft so they survive leaving
+      // the group and coming back.
+      final undoHistory = await widget.storage.loadGroupUndoHistory(_group.id);
+      _undoStack = undoHistory.undo;
+      _redoStack = undoHistory.redo;
     } else {
       _rows = defaultGroupRows(_group.id);
-      _commissionTracking = widget.settings.defaultCommissionTracking;
+      _commissionTracking = _defaultCommissionTracking;
+      await widget.storage.clearGroupUndoHistory(_group.id);
     }
 
     await _refreshCommissionBalance();
-    if (mounted) setState(() => _loading = false);
-  }
-
-  void _restoreResultFromDraft(DraftState draft) {
-    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
-    if (!validation.isValid) {
-      _result = null;
-      return;
-    }
-    try {
-      _result = calculateSettlement(
-        _rows,
-        passingRate: _passingRate,
-        amountDeductionRate: _amountDeductionRate,
-        commissionTracking: _commissionTracking,
-        storedCommissionBalance: _storedCommissionBalance,
-      );
-    } catch (_) {
-      _result = null;
+    if (mounted) {
+      setState(() => _loading = false);
+      _updateLiveResult();
     }
   }
 
@@ -181,17 +346,19 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     if (mounted) setState(() => _storedCommissionBalance = balance);
   }
 
+  void _scheduleDraftSave({String lastView = 'main'}) {
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(
+      const Duration(milliseconds: 400),
+      () => _saveDraft(lastView: lastView),
+    );
+  }
+
+  /// Persists the in-progress work. History is deliberately untouched here:
+  /// records are only written when Calculate runs.
   Future<void> _saveDraft({String lastView = 'main'}) async {
     try {
       final now = DateTime.now();
-      final hasData = _rows.any(
-        (row) =>
-            row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
-      );
-
-      if (hasData) {
-        _historyEntryId ??= now.microsecondsSinceEpoch.toString();
-      }
 
       await widget.storage.saveGroupDraft(
         _group.id,
@@ -209,10 +376,6 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
         ),
       );
 
-      if (hasData && _historyEntryId != null) {
-        await _syncHistoryEntry(lastView: lastView, updatedAt: now);
-      }
-
       await widget.storage.upsertGroup(
         _group.copyWith(updatedAt: now),
       );
@@ -222,23 +385,16 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     }
   }
 
-  void _updateDerivedResult() {
-    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
-    if (!validation.isValid) {
-      _result = null;
-      return;
-    }
-    try {
-      _result = calculateSettlement(
-        _rows,
-        passingRate: _passingRate,
-        amountDeductionRate: _amountDeductionRate,
-        commissionTracking: _commissionTracking,
-        storedCommissionBalance: _storedCommissionBalance,
-      );
-    } catch (_) {
-      _result = null;
-    }
+  /// Rows that actually carry a number. Entries left untouched are not worth
+  /// recording, so they never reach history.
+  List<RowData> _filledRows() {
+    return _rows
+        .where(
+          (row) =>
+              row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
+        )
+        .map((row) => row.copyWith())
+        .toList();
   }
 
   Future<void> _syncHistoryEntry({
@@ -256,13 +412,9 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
       }
     }
 
-    final status = _result != null
-        ? HistoryEntry.completedStatus
-        : HistoryEntry.draftStatus;
-
     final entry = DraftState(
       title: _title,
-      rows: _rows,
+      rows: _filledRows(),
       passingRate: _passingRate,
       amountDeductionRate: _amountDeductionRate,
       commissionTracking: _commissionTracking,
@@ -273,7 +425,9 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
       originalPastedText: _originalPastedText,
     ).toHistoryEntry(
       id: _historyEntryId!,
-      status: status,
+      // Writing history only happens on Calculate, and that makes the record
+      // final. Untouched entries are dropped rather than marking it a draft.
+      status: HistoryEntry.completedStatus,
       savedAt: existing?.savedAt ?? now,
       updatedAt: now,
       commissionEarned: _result?.commissionEarned,
@@ -285,7 +439,25 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     await widget.storage.upsertHistoryEntry(entry);
   }
 
-  Future<void> _applyCalculatedResult(CalculationResult result) async {
+  CalculationResult? _computePreview() {
+    if (!_hasCalculationInput) return null;
+    try {
+      return calculateSettlement(
+        _rows,
+        passingRate: _passingRate,
+        amountDeductionRate: _amountDeductionRate,
+        commissionTracking: _commissionTracking,
+        storedCommissionBalance: _storedCommissionBalance,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _applyFinalizedResult(CalculationResult result) async {
+    if (_editingHistoryEntryId != null) {
+      _historyEntryId = _editingHistoryEntryId;
+    }
     _historyEntryId ??= DateTime.now().microsecondsSinceEpoch.toString();
 
     final history = await widget.storage.loadHistory();
@@ -323,42 +495,69 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     });
 
     await _saveDraft(lastView: 'results');
+
+    // Calculate is the only thing that writes history. The id stays put so a
+    // repeat calculation updates this record, while the next edit clears it and
+    // starts a new one.
+    await _syncHistoryEntry(lastView: 'results');
+    if (!mounted) return;
+    setState(() {
+      _lastSavedHistoryEntryId = _historyEntryId;
+      _changedSinceCalculation = false;
+    });
   }
 
-  Future<void> _calculate() async {
+  /// Recomputes the on-screen totals whenever row data changes.
+  void _updateLiveResult() {
+    if (!mounted) return;
+    setState(() {
+      _result = _computePreview();
+      if (_result != null) {
+        _errorMessage = null;
+        _errorRowIndex = null;
+      }
+    });
+  }
+
+  /// Saves the current calculation to history and commission balances.
+  Future<void> _finalizeCalculation() async {
+    if (!_hasCalculationInput) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter at least one amount or bracket first.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isCalculating = true;
       _errorMessage = null;
       _errorRowIndex = null;
     });
 
-    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
-    if (!validation.isValid) {
-      setState(() {
-        _isCalculating = false;
-        _errorMessage = validation.errorMessage;
-        _errorRowIndex = validation.rowIndex;
-        _result = null;
-      });
-      return;
-    }
-
     try {
-      final result = calculateSettlement(
-        _rows,
-        passingRate: _passingRate,
-        amountDeductionRate: _amountDeductionRate,
-        commissionTracking: _commissionTracking,
-        storedCommissionBalance: _storedCommissionBalance,
-      );
-      await _applyCalculatedResult(result);
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Calculation failed.';
-          _result = null;
-        });
+      final result = _computePreview();
+      if (result == null) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Calculation failed.';
+            _result = null;
+          });
+        }
+        return;
       }
+      await _applyFinalizedResult(result);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Calculation finalized'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(milliseconds: 1800),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isCalculating = false);
     }
@@ -366,8 +565,6 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
 
   String? _buildCopyMessageSafe() {
     if (_result == null) return null;
-    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
-    if (!validation.isValid) return null;
     try {
       return buildPasteCopyMessage(
         title: _title,
@@ -400,46 +597,6 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     await shareOnlyCalculationMessage(message);
   }
 
-  void _onRatesChanged(CalculationRates rates) {
-    setState(() {
-      _passingRate = rates.passingRate;
-      _amountDeductionRate = rates.amountDeductionRate;
-      _errorMessage = null;
-      _group = _group.copyWith(
-        passingRate: rates.passingRate,
-        amountDeductionRate: rates.amountDeductionRate,
-      );
-    });
-    _updateLiveResult();
-    _saveDraft();
-  }
-
-  void _onCommissionTrackingChanged(bool value) {
-    setState(() => _commissionTracking = value);
-    _updateLiveResult();
-    _saveDraft();
-  }
-
-  void _updateLiveResult() {
-    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
-    if (!validation.isValid) {
-      if (_result != null) setState(() => _result = null);
-      return;
-    }
-    try {
-      final result = calculateSettlement(
-        _rows,
-        passingRate: _passingRate,
-        amountDeductionRate: _amountDeductionRate,
-        commissionTracking: _commissionTracking,
-        storedCommissionBalance: _storedCommissionBalance,
-      );
-      if (mounted) setState(() => _result = result);
-    } catch (_) {
-      if (_result != null) setState(() => _result = null);
-    }
-  }
-
   Future<void> _clearCommission() async {
     final confirmed = await showHisabProConfirmDialog(
       context: context,
@@ -457,26 +614,83 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   }
 
   void _onRowChanged(int index, RowData row) {
-    setState(() {
-      _rows[index] = row;
-      _errorMessage = null;
-      _errorRowIndex = null;
-    });
+    var targetIndex = index;
+    if (targetIndex < 0 ||
+        targetIndex >= _rows.length ||
+        _rows[targetIndex].id != row.id) {
+      targetIndex = _rows.indexWhere((entry) => entry.id == row.id);
+    }
+    if (targetIndex < 0) return;
+    _pushUndoSnapshot();
+    _rows[targetIndex] = row;
+    _errorMessage = null;
+    _errorRowIndex = null;
+    _markRowsChanged();
     _updateLiveResult();
-    _saveDraft();
+    _scheduleDraftSave();
   }
 
-  void _deleteRow(int index) {
+  Future<void> _deleteRowById(String rowId) async {
+    final index = _rows.indexWhere((row) => row.id == rowId);
+    if (index < 0) return;
+    await _deleteRow(index);
+  }
+
+  Future<void> _deleteRow(int index) async {
+    if (index < 0 || index >= _rows.length) return;
+    final row = _rows[index];
+    final rowId = row.id;
+    final name = row.name.trim().isEmpty ? 'this entry' : row.name.trim();
+
+    final confirmed = await showHisabProConfirmDialog(
+      context: context,
+      title: 'Delete entry?',
+      message: 'Are you sure you want to delete $name?',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (confirmed != true || !mounted) return;
+
+    final deleteIndex = _rows.indexWhere((entry) => entry.id == rowId);
+    if (deleteIndex < 0) return;
+
+    _pushUndoSnapshot();
     setState(() {
-      _rows.removeAt(index);
+      _rows.removeAt(deleteIndex);
       if (_rows.isEmpty) {
         _rows = defaultGroupRows(_group.id);
       }
       _errorMessage = null;
       _errorRowIndex = null;
+      _markRowsChanged();
     });
     _updateLiveResult();
-    _saveDraft();
+    await _saveDraft();
+  }
+
+  void _moveRow(int fromIndex, int toIndex) {
+    if (fromIndex == toIndex) return;
+    if (fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= _rows.length ||
+        toIndex >= _rows.length) {
+      return;
+    }
+    _pushUndoSnapshot();
+    setState(() {
+      final row = _rows.removeAt(fromIndex);
+      _rows.insert(toIndex, row);
+      _errorMessage = null;
+      _errorRowIndex = null;
+      _markRowsChanged();
+    });
+    _scheduleDraftSave();
+  }
+
+  void _moveRowById(String rowId, int direction) {
+    final index = _rows.indexWhere((row) => row.id == rowId);
+    if (index < 0) return;
+    _moveRow(index, index + direction);
   }
 
   Future<void> _resetDigits() async {
@@ -496,14 +710,16 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
       return;
     }
 
+    _pushUndoSnapshot();
     setState(() {
       _rows = _rows
           .map((row) => row.copyWith(amount: '', bracket: ''))
           .toList();
-      _result = null;
       _errorMessage = null;
       _errorRowIndex = null;
+      _markRowsChanged();
     });
+    _updateLiveResult();
     await _saveDraft();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -518,6 +734,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   void _addRow() {
     final name = nextMissingFixedName(_rows);
     if (name == null) return;
+    _pushUndoSnapshot();
     setState(() {
       _rows.add(
         RowData(
@@ -525,44 +742,50 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
           name: name,
         ),
       );
+      _errorMessage = null;
+      _errorRowIndex = null;
+      _markRowsChanged();
     });
-    _saveDraft();
+    _scheduleDraftSave();
+  }
+
+  Future<List<String>> _recentCustomEntryNames() async {
+    final used = await _customEntryUsage.getMostUsedNames(limit: 6);
+    if (used.isNotEmpty) return used;
+
+    final saved = widget.settings.customEntryNames;
+    if (saved.isNotEmpty) {
+      return saved.reversed.take(6).toList().reversed.toList();
+    }
+
+    return defaultCustomEntrySuggestions;
   }
 
   Future<void> _addCustomEntry() async {
-    final controller = TextEditingController();
-    final raw = await showDialog<String>(
+    final recentOptions = await _recentCustomEntryNames();
+    if (!mounted) return;
+
+    final raw = await showHisabProPromptDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Custom Entry Name'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            hintText: 'e.g. Mk.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Add'),
-          ),
-        ],
-      ),
+      title: 'Custom Entry Name',
+      hintText: 'e.g. Mk.',
+      confirmLabel: 'Add',
+      recentOptions: recentOptions,
     );
-    controller.dispose();
-    if (raw == null) return;
+    if (raw == null || !mounted) return;
 
     final name = formatCustomEntryName(raw);
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a name.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     if (_rows.any((row) => row.name.trim() == name)) {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('This entry name is already in the list.'),
@@ -578,9 +801,13 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
         customEntryNames: [...widget.settings.customEntryNames, name],
       );
       await widget.storage.saveSettings(updatedSettings);
+      if (!mounted) return;
       widget.onSettingsChanged(updatedSettings);
     }
 
+    await _customEntryUsage.recordUsage(name);
+
+    _pushUndoSnapshot();
     setState(() {
       _rows.add(
         RowData(
@@ -588,33 +815,64 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
           name: name,
         ),
       );
+      _errorMessage = null;
+      _errorRowIndex = null;
+      _markRowsChanged();
     });
-    _saveDraft();
+    await _saveDraft();
   }
 
-  Future<void> _finalizeSessionHistory() async {
-    if (_result != null) {
-      await _syncHistoryEntry(lastView: 'results');
-    } else if (_rows.any(
-      (row) =>
-          row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
-    )) {
-      await _saveDraft();
-    }
+  void _openSessionMenu(BuildContext menuContext) {
+    showHisabHeaderMenu(
+      context: context,
+      position: hisabMenuPosition(menuContext),
+      items: [
+        HisabMenuItem(
+          value: 'edit',
+          label: 'Edit',
+          icon: Icons.edit_outlined,
+          onTap: _editGroup,
+        ),
+        HisabMenuItem(
+          value: 'history',
+          label: 'View Group History',
+          icon: Icons.history_rounded,
+          onTap: _openGroupHistory,
+        ),
+        HisabMenuItem(
+          value: 'clear',
+          label: 'Clear Current Draft',
+          icon: Icons.cleaning_services_outlined,
+          onTap: _clearDraft,
+        ),
+        HisabMenuItem(
+          value: 'delete',
+          label: 'Delete Group',
+          icon: Icons.delete_outline_rounded,
+          onTap: _deleteGroup,
+          destructive: true,
+        ),
+      ],
+    );
   }
 
   Future<void> _startFreshCalculation() async {
-    await _finalizeSessionHistory();
     await widget.storage.clearGroupDraft(_group.id);
     setState(() {
       _syncGroupMeta();
       _rows = defaultGroupRows(_group.id);
       _result = null;
       _historyEntryId = null;
+      _editingHistoryEntryId = null;
+      _lastSavedHistoryEntryId = null;
       _originalPastedText = null;
       _errorMessage = null;
       _errorRowIndex = null;
-      _commissionTracking = widget.settings.defaultCommissionTracking;
+      _changedSinceCalculation = false;
+      _commissionTracking = _commissionEnabled
+          ? widget.settings.defaultCommissionTracking
+          : false;
+      _clearUndoHistory();
     });
     await _refreshCommissionBalance();
   }
@@ -622,21 +880,29 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   void _loadFromHistory(HistoryEntry entry) {
     setState(() {
       _syncGroupMeta();
+      _passingRate = entry.passingRate;
+      _amountDeductionRate = entry.amountDeductionRate;
       _rows = restoreGroupRows(entry.rows, _group.id);
-      _commissionTracking = entry.commissionTracking;
+      _commissionTracking =
+          _commissionEnabled ? entry.commissionTracking : false;
       _historyEntryId = entry.id;
+      _editingHistoryEntryId = entry.id;
+      _lastSavedHistoryEntryId = null;
       _originalPastedText = entry.originalPastedText;
       _result = null;
       _errorMessage = null;
       _errorRowIndex = null;
+      _changedSinceCalculation = false;
+      _clearUndoHistory();
     });
     _saveDraft();
-    _refreshCommissionBalance();
-    _calculate();
+    _refreshCommissionBalance().then((_) {
+      if (mounted) _updateLiveResult();
+    });
   }
 
   Future<void> _onHistoryEntryDeleted(String id) async {
-    if (id != _historyEntryId) return;
+    if (id != _historyEntryId && id != _lastSavedHistoryEntryId) return;
     await widget.storage.clearGroupDraft(_group.id);
     await _startFreshCalculation();
   }
@@ -695,13 +961,13 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     setState(() {
       _group = updated;
       _syncGroupMeta();
+      if (!_commissionEnabled) {
+        _commissionTracking = false;
+      }
     });
     widget.onGroupUpdated?.call();
-    if (_result != null) {
-      await _calculate();
-    } else {
-      await _saveDraft();
-    }
+    _updateLiveResult();
+    await _saveDraft();
   }
 
   void _openGroupHistory() {
@@ -711,10 +977,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
         builder: (context) => HistoryScreen(
           storage: widget.storage,
           groupIdFilter: _group.id,
-          onEditEntry: (entry) {
-            Navigator.pop(context);
-            _loadFromHistory(entry);
-          },
+          onEditEntry: _loadFromHistory,
           onDeleteEntry: _onHistoryEntryDeleted,
         ),
       ),
@@ -744,28 +1007,24 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
         elevation: 0,
         title: Text(_group.name),
         actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              switch (value) {
-                case 'edit':
-                  _editGroup();
-                case 'history':
-                  _openGroupHistory();
-                case 'clear':
-                  _clearDraft();
-                case 'delete':
-                  _deleteGroup();
-              }
+          IconButton(
+            onPressed: _canUndo ? _undo : null,
+            icon: const Icon(Icons.undo_rounded),
+            tooltip: 'Undo',
+          ),
+          IconButton(
+            onPressed: _canRedo ? _redo : null,
+            icon: const Icon(Icons.redo_rounded),
+            tooltip: 'Redo',
+          ),
+          Builder(
+            builder: (menuContext) {
+              return IconButton(
+                onPressed: () => _openSessionMenu(menuContext),
+                icon: const Icon(Icons.more_vert_rounded),
+                tooltip: 'More options',
+              );
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit')),
-              PopupMenuItem(value: 'history', child: Text('View Group History')),
-              PopupMenuItem(value: 'clear', child: Text('Clear Current Draft')),
-              PopupMenuItem(
-                value: 'delete',
-                child: Text('Delete Group', style: TextStyle(color: AppColors.danger)),
-              ),
-            ],
           ),
         ],
         bottom: PreferredSize(
@@ -784,168 +1043,195 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.pagePadding,
-            12,
-            AppSpacing.pagePadding,
-            24,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              PersistentHeaderInput(
-                controller: _persistentHeaderController,
-                onChanged: (text) async {
-                  await widget.storage.savePersistentHeader(text);
-                },
+        child: CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.pagePadding,
+                12,
+                AppSpacing.pagePadding,
+                0,
               ),
-              const SizedBox(height: AppSpacing.sectionGap),
-              CalculationRatesControl(
-                rates: CalculationRates(
-                  passingRate: _passingRate,
-                  amountDeductionRate: _amountDeductionRate,
+              sliver: SliverToBoxAdapter(
+                child: PersistentHeaderInput(
+                  controller: _persistentHeaderController,
+                  onChanged: (text) async {
+                    await widget.storage.savePersistentHeader(text);
+                  },
                 ),
-                deductionLinkedToPassing: _deductionLinkedToPassing,
-                onDeductionLinkChanged: (linked) {
-                  setState(() => _deductionLinkedToPassing = linked);
-                },
-                onRatesChanged: _onRatesChanged,
-                commissionTracking: _commissionTracking,
-                onCommissionTrackingChanged: _onCommissionTrackingChanged,
               ),
-              const SizedBox(height: AppSpacing.sectionGap),
-              GroupStaticRowTable(
-                rows: _rows,
-                onRowChanged: _onRowChanged,
-                onDeleteRow: _deleteRow,
-                onAddRow: _addRow,
-                onAddCustomEntry: _addCustomEntry,
-                onReset: _resetSession,
-                onResetDigits: _resetDigits,
-                errorRowIndex: _errorRowIndex,
-                canAddRow: canAddRow,
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.pagePadding,
+                AppSpacing.sectionGap,
+                AppSpacing.pagePadding,
+                0,
               ),
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _errorMessage!,
-                  style: const TextStyle(
-                    color: AppColors.danger,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-              if (_result != null) ...[
-                const SizedBox(height: 16),
-                PasteResultSummary(result: _result!),
-                if (_result!.showsCommissionInfo) ...[
-                  const SizedBox(height: 12),
-                  CommissionBalanceCard(
-                    result: _result!,
-                    onClear:
-                        _result!.commissionTracking ? _clearCommission : null,
-                  ),
-                ],
-              ],
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _openGroupHistory,
-                      icon: const Icon(Icons.history_rounded, size: 18),
-                      label: const Text('History'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _startFreshCalculation,
-                      icon: const Icon(Icons.note_add_outlined, size: 18),
-                      label: const Text('New'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: _isCalculating ? null : _calculate,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primaryBlue,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: _isCalculating
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(
-                        'Calculate',
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+              sliver: SliverToBoxAdapter(
+                child: Container(
+                  width: double.infinity,
+                  decoration: surfaceDecoration(context),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                        child: GroupEntriesHeader(
+                          rows: _rows,
+                          onReset: _resetSession,
+                          onResetDigits: _resetDigits,
                         ),
                       ),
+                      ...List.generate(_rows.length, (index) {
+                        final row = _rows[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: GroupEntryRow(
+                            key: ValueKey(row.id),
+                            row: row,
+                            hasError: _errorRowIndex == index,
+                            onChanged: (updated) =>
+                                _onRowChanged(index, updated),
+                            onDelete: () => _deleteRowById(row.id),
+                            onMoveUp: index > 0
+                                ? () => _moveRowById(row.id, -1)
+                                : null,
+                            onMoveDown: index < _rows.length - 1
+                                ? () => _moveRowById(row.id, 1)
+                                : null,
+                          ),
+                        );
+                      }),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        child: GroupEntriesFooter(
+                          onAddRow: _addRow,
+                          onAddCustomEntry: () => _addCustomEntry(),
+                          canAddRow: canAddRow,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              if (copyMessage != null) ...[
-                const SizedBox(height: 8),
-                Row(
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.pagePadding,
+                0,
+                AppSpacing.pagePadding,
+                24,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _copyResult,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primaryBlue,
-                          backgroundColor: AppColors.surface,
-                          side: const BorderSide(color: AppColors.border),
-                          minimumSize:
-                              const Size.fromHeight(AppSpacing.buttonHeight),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _errorMessage!,
+                        style: const TextStyle(
+                          color: AppColors.danger,
+                          fontSize: 14,
                         ),
-                        icon: const Icon(Icons.copy_outlined, size: 18),
-                        label: const Text('Copy'),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _shareResult,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primaryBlue,
-                          backgroundColor: AppColors.surface,
-                          side: const BorderSide(color: AppColors.border),
-                          minimumSize:
-                              const Size.fromHeight(AppSpacing.buttonHeight),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                    ],
+                    if (_result != null) ...[
+                      const SizedBox(height: 16),
+                      PasteResultSummary(result: _result!),
+                      if (_commissionEnabled &&
+                          _result!.showsCommissionInfo) ...[
+                        const SizedBox(height: 12),
+                        CommissionBalanceCard(
+                          result: _result!,
+                          onClear: _result!.commissionTracking
+                              ? _clearCommission
+                              : null,
                         ),
-                        icon: const Icon(Icons.share_outlined, size: 18),
-                        label: const Text('Share'),
+                      ],
+                    ],
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _isCalculating ? null : _finalizeCalculation,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.success,
+                        foregroundColor: Colors.white,
+                        minimumSize:
+                            const Size.fromHeight(AppSpacing.buttonHeight),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
+                      child: _isCalculating
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              _isUpdatingHistory
+                                  ? 'Update data'
+                                  : 'Final & Done',
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
+                    if (copyMessage != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _copyResult,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.primaryBlue,
+                                backgroundColor: AppColors.surface,
+                                side: const BorderSide(color: AppColors.border),
+                                minimumSize: const Size.fromHeight(
+                                  AppSpacing.buttonHeight,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              icon: const Icon(Icons.copy_outlined, size: 18),
+                              label: const Text('Copy'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _shareResult,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.primaryBlue,
+                                backgroundColor: AppColors.surface,
+                                side: const BorderSide(color: AppColors.border),
+                                minimumSize: const Size.fromHeight(
+                                  AppSpacing.buttonHeight,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              icon: const Icon(Icons.share_outlined, size: 18),
+                              label: const Text('Share'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
-              ],
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     ),

@@ -1,7 +1,6 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/calculate.dart' show calculateSettlement, defaultAmountDeductionRate, defaultPassingRate;
@@ -9,17 +8,14 @@ import '../core/clipboard_reader.dart';
 import '../core/commission.dart';
 import '../core/copy_message.dart';
 import '../core/format.dart';
-import '../core/money.dart' show percentOf, roundMoney, suggestedAmountDeduction;
-import '../core/parse_number.dart';
 import '../core/smart_text_parser.dart';
 import '../core/storage.dart';
 import '../core/validate.dart';
 import '../models/calculation_group.dart';
 import '../models/calculation_result.dart';
 import '../models/paste_recent_entry.dart';
-import '../models/row_data.dart';
 import '../theme/app_theme.dart';
-import '../widgets/calculation_rates_control.dart';
+import '../core/share_message.dart';
 import '../widgets/commission_balance_card.dart';
 import '../widgets/hisab_pro_modal.dart';
 import '../widgets/paste_result_summary.dart';
@@ -54,17 +50,18 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
   String _persistentHeader = '';
   bool _isCalculating = false;
   bool _commissionTracking = false;
-  bool _deductionLinkedToPassing = true;
   Decimal _passingRate = defaultPassingRate;
   Decimal _amountDeductionRate = defaultAmountDeductionRate;
+
+  bool get _commissionEnabled => widget.settings.commissionEnabled;
+
   @override
   void initState() {
     super.initState();
-    _commissionTracking = widget.settings.defaultCommissionTracking;
+    _commissionTracking = _commissionEnabled &&
+        widget.settings.defaultCommissionTracking;
     _passingRate = widget.settings.defaultPassingRate;
     _amountDeductionRate = widget.settings.defaultAmountDeductionRate;
-    _deductionLinkedToPassing =
-        _amountDeductionRate == suggestedAmountDeduction(_passingRate);
     _textController.addListener(_persistDraft);
     _loadInitialState();
   }
@@ -165,23 +162,7 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     );
     _passingRate = resolved.passingRate;
     _amountDeductionRate = resolved.amountDeductionRate;
-    _deductionLinkedToPassing =
-        _amountDeductionRate == suggestedAmountDeduction(_passingRate);
     return resolved;
-  }
-
-  void _onRatesChanged(CalculationRates rates) {
-    setState(() {
-      _passingRate = rates.passingRate;
-      _amountDeductionRate = rates.amountDeductionRate;
-      _errors = [];
-    });
-    if (_parsed != null) _parseAndCalculate(silent: true);
-  }
-
-  void _onCommissionTrackingChanged(bool value) {
-    setState(() => _commissionTracking = value);
-    if (_parsed != null) _parseAndCalculate(silent: true);
   }
 
   Future<void> _clearCommission() async {
@@ -426,20 +407,6 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     );
   }
 
-  Decimal _sumAmounts(List<RowData> rows) {
-    return rows.fold(
-      Decimal.zero,
-      (sum, row) => sum + (tryParseDecimal(row.amount) ?? Decimal.zero),
-    );
-  }
-
-  Decimal _sumBrackets(List<RowData> rows) {
-    return rows.fold(
-      Decimal.zero,
-      (sum, row) => sum + (tryParseDecimal(row.bracket) ?? Decimal.zero),
-    );
-  }
-
   String? get _copyMessage {
     if (_parsed == null || _result == null) return null;
     return buildPasteCopyMessage(
@@ -454,7 +421,7 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     final message = _copyMessage;
     if (message == null) return;
 
-    await Clipboard.setData(ClipboardData(text: message));
+    await copyCalculationMessage(message);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -465,78 +432,57 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     );
   }
 
-  Widget _buildPreviewCard() {
-    if (_parsed == null) return const SizedBox.shrink();
+  Future<void> _shareResult() async {
+    final message = _copyMessage;
+    if (message == null) return;
 
-    final rates = _resolveRates(_parsed!);
-    final totalAmount = _sumAmounts(_parsed!.rows);
-    final totalPassing = _sumBrackets(_parsed!.rows);
-    final entryCount = _parsed!.rows.length;
-    final deductionAmount = _result?.commissionEarned ??
-        roundMoney(percentOf(totalAmount, rates.amountDeductionRate));
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.successLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.success.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.check_circle, color: AppColors.success, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                '$entryCount entries detected',
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.success,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _previewRow('Passing', formatPlainNumber(rates.passingRate)),
-          _previewRow('Deduction', formatRate(rates.amountDeductionRate)),
-          _previewRow(
-            'Deduction amount',
-            formatMoney(deductionAmount, showCurrency: true),
-          ),
-          _previewRow('Total Amount', formatMoney(totalAmount, showCurrency: true)),
-          _previewRow('Total passing', formatBracket(totalPassing)),
-        ],
-      ),
-    );
+    await shareOnlyCalculationMessage(message);
   }
 
-  Widget _previewRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Text(
-            '$label:',
-            style: GoogleFonts.inter(color: AppColors.secondaryText),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            value,
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.w600,
-              color: AppColors.primaryText,
+  Widget _buildCopyShareRow({required bool enabled}) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: enabled ? _copyResult : null,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primaryBlue,
+              backgroundColor: AppColors.surface,
+              side: const BorderSide(color: AppColors.border),
+              minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
+            icon: const Icon(Icons.copy_outlined, size: 18),
+            label: const Text('Copy'),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: enabled ? _shareResult : null,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primaryBlue,
+              backgroundColor: AppColors.surface,
+              side: const BorderSide(color: AppColors.border),
+              minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: const Icon(Icons.share_outlined, size: 18),
+            label: const Text('Share'),
+          ),
+        ),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final canCopyShare = _copyMessage != null;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -552,25 +498,53 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.pagePadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.pagePadding,
+                AppSpacing.pagePadding,
+                AppSpacing.pagePadding,
+                12,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
             Row(
               children: [
-                Text(
-                  'Paste your calculation message',
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primaryText,
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _reset,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primaryBlue,
+                      backgroundColor: AppColors.surface,
+                      side: const BorderSide(color: AppColors.border),
+                      minimumSize:
+                          const Size.fromHeight(AppSpacing.buttonHeight),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.clear_all_rounded, size: 18),
+                    label: const Text('Clear All'),
                   ),
                 ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: _pasteFromClipboard,
-                  icon: const Icon(Icons.content_paste, size: 18),
-                  label: const Text('Paste'),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _pasteFromClipboard,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primaryBlue,
+                      minimumSize:
+                          const Size.fromHeight(AppSpacing.buttonHeight),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.content_paste_rounded, size: 18),
+                    label: const Text('Paste'),
+                  ),
                 ),
               ],
             ),
@@ -608,20 +582,6 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                   hasError: true,
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.sectionGap),
-            CalculationRatesControl(
-              rates: CalculationRates(
-                passingRate: _passingRate,
-                amountDeductionRate: _amountDeductionRate,
-              ),
-              deductionLinkedToPassing: _deductionLinkedToPassing,
-              onDeductionLinkChanged: (linked) {
-                setState(() => _deductionLinkedToPassing = linked);
-              },
-              onRatesChanged: _onRatesChanged,
-              commissionTracking: _commissionTracking,
-              onCommissionTrackingChanged: _onCommissionTrackingChanged,
             ),
             if (_errors.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -662,29 +622,10 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                 ),
               ),
             ],
-            _buildPreviewCard(),
             if (_result != null) ...[
               const SizedBox(height: 16),
-              Stack(
-                children: [
-                  PasteResultSummary(result: _result!),
-                  if (_copyMessage != null)
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: IconButton(
-                        tooltip: 'Copy',
-                        onPressed: _copyResult,
-                        icon: const Icon(
-                          Icons.copy_outlined,
-                          color: AppColors.secondaryText,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              if (_result!.showsCommissionInfo) ...[
+              PasteResultSummary(result: _result!),
+              if (_commissionEnabled && _result!.showsCommissionInfo) ...[
                 const SizedBox(height: 12),
                 CommissionBalanceCard(
                   result: _result!,
@@ -693,34 +634,50 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                 ),
               ],
             ],
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: _isCalculating ? null : _parseAndCalculate,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryBlue,
-                minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
+                ],
               ),
-              child: _isCalculating
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.pagePadding,
+                8,
+                AppSpacing.pagePadding,
+                AppSpacing.pagePadding,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FilledButton(
+                    onPressed: _isCalculating ? null : _parseAndCalculate,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primaryBlue,
+                      minimumSize:
+                          const Size.fromHeight(AppSpacing.buttonHeight),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    )
-                  : const Text('Calculate'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: _reset,
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
+                    ),
+                    child: _isCalculating
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Calculate'),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildCopyShareRow(enabled: canCopyShare),
+                ],
               ),
-              child: const Text('Reset'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

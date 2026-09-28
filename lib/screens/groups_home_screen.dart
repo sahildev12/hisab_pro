@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../constants/entry_names.dart';
+import '../core/demo_seed.dart';
 import '../core/format.dart';
 import '../core/history_helpers.dart';
 import '../core/storage.dart';
@@ -11,6 +13,7 @@ import '../models/history_entry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/hisab_logo.dart';
+import '../widgets/hisab_page_header.dart';
 import '../widgets/hisab_pro_modal.dart';
 import 'create_group_screen.dart';
 import 'group_session_screen.dart';
@@ -64,6 +67,10 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
   }
 
   Future<void> _bootstrap() async {
+    // Demo data is for local debug only — production users start with a clean app.
+    if (kDebugMode) {
+      await seedDemoDataIfNeeded(widget.storage);
+    }
     await widget.storage.migrateLegacyToDefaultGroup();
     await _reload();
   }
@@ -199,6 +206,38 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
     );
   }
 
+  void _editHistoryEntry(HistoryEntry entry) {
+    final groupId = entry.groupId;
+    if (groupId == null) return;
+
+    CalculationGroup? group;
+    for (final candidate in _groups) {
+      if (candidate.id == groupId) {
+        group = candidate;
+        break;
+      }
+    }
+    if (group == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => GroupSessionScreen(
+            storage: widget.storage,
+            settings: widget.settings,
+            group: group!,
+            entryNames: allEntryNames(widget.settings.customEntryNames),
+            onSettingsChanged: widget.onSettingsChanged,
+            onGroupUpdated: _reload,
+            initialHistoryEntry: entry,
+          ),
+        ),
+      ).then((_) => _reload());
+    });
+  }
+
   void _openGroupHistory(CalculationGroup group) {
     Navigator.push(
       context,
@@ -206,7 +245,7 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
         builder: (context) => HistoryScreen(
           storage: widget.storage,
           groupIdFilter: group.id,
-          onEditEntry: (_) {},
+          onEditEntry: _editHistoryEntry,
         ),
       ),
     ).then((_) => _reload());
@@ -237,7 +276,6 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
             widget.onSettingsChanged(s);
             setState(() {});
           },
-          onOpenHistoryEntry: (_) {},
         ),
       ),
     );
@@ -294,11 +332,12 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
                           ),
                           label: const Text('Smart'),
                         ),
-                        IconButton(
-                          onPressed: _openTotalCommission,
-                          icon: const Icon(Icons.payments_outlined),
-                          tooltip: 'Total Commission',
-                        ),
+                        if (_groups.any((group) => group.commissionEnabled))
+                          IconButton(
+                            onPressed: _openTotalCommission,
+                            icon: const Icon(Icons.payments_outlined),
+                            tooltip: 'Total Commission',
+                          ),
                         IconButton(
                           onPressed: _openSettings,
                           icon: const Icon(Icons.settings_outlined),
@@ -478,29 +517,37 @@ class _GroupRow extends StatelessWidget {
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: AppColors.slate),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'history':
-                      onOpenHistory();
-                    case 'delete':
-                      onDelete();
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: 'history',
-                    child: Text('View History'),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Text(
-                      'Delete Group',
-                      style: TextStyle(color: AppColors.danger),
+              Builder(
+                builder: (menuContext) {
+                  return IconButton(
+                    onPressed: () {
+                      showHisabHeaderMenu(
+                        context: context,
+                        position: hisabMenuPosition(menuContext),
+                        items: [
+                          HisabMenuItem(
+                            value: 'history',
+                            label: 'View History',
+                            icon: Icons.history_rounded,
+                            onTap: onOpenHistory,
+                          ),
+                          HisabMenuItem(
+                            value: 'delete',
+                            label: 'Delete Group',
+                            icon: Icons.delete_outline_rounded,
+                            onTap: onDelete,
+                            destructive: true,
+                          ),
+                        ],
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.more_vert_rounded,
+                      color: AppColors.slate,
                     ),
-                  ),
-                ],
+                    tooltip: 'More options',
+                  );
+                },
               ),
             ],
           ),

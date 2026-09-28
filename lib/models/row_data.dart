@@ -34,7 +34,7 @@ class RowData {
 
   factory RowData.fromJson(Map<String, dynamic> json) {
     return RowData(
-      id: json['id'] as String,
+      id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       amount: json['amount'] as String? ?? '',
       bracket: json['bracket'] as String? ?? '',

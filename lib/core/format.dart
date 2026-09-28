@@ -60,3 +60,8 @@ String formatHistoryCardDate(DateTime date) {
   final timePart = DateFormat('h:mm a').format(date);
   return '$datePart • $timePart';
 }
+
+/// History card time only (date is shown in the section header).
+String formatHistoryCardTime(DateTime date) {
+  return DateFormat('h:mm a').format(date);
+}

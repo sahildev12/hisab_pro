@@ -46,6 +46,8 @@ class _CalculationDefaultsScreenState extends State<CalculationDefaultsScreen> {
         widget.initialSettings.defaultCommissionTracking;
   }
 
+  bool get _commissionEnabled => widget.initialSettings.commissionEnabled;
+
   @override
   void dispose() {
     _passingController.dispose();
@@ -128,50 +130,56 @@ class _CalculationDefaultsScreenState extends State<CalculationDefaultsScreen> {
             const SizedBox(height: 14),
             _rateCard(
               icon: Icons.remove_circle_outline,
-              label: 'Commission / Deduction Rate',
-              hint:
-                  'Commission rate from Total Amount. Deducted daily when tracking is off.',
+              label: _commissionEnabled
+                  ? 'Commission / Deduction Rate'
+                  : 'Deduction Rate',
+              hint: _commissionEnabled
+                  ? 'Commission rate from Total Amount. Deducted daily when tracking is off.'
+                  : 'Percentage deducted from Total Amount before comparing to passing.',
               controller: _deductionController,
               error: _deductionError,
               onChanged: _onDeductionChanged,
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: surfaceDecoration(context),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Keep Commission Separate by Default',
-                          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'New calculations will track commission separately.',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: AppColors.secondaryText,
+            if (_commissionEnabled) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: surfaceDecoration(context),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Keep Commission Separate by Default',
+                            style:
+                                GoogleFonts.inter(fontWeight: FontWeight.w600),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          Text(
+                            'New calculations will track commission separately.',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.secondaryText,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Switch.adaptive(
-                    value: _defaultCommissionTracking,
-                    onChanged: (value) {
-                      setState(() {
-                        _defaultCommissionTracking = value;
-                        _saved = false;
-                      });
-                    },
-                  ),
-                ],
+                    Switch.adaptive(
+                      value: _defaultCommissionTracking,
+                      onChanged: (value) {
+                        setState(() {
+                          _defaultCommissionTracking = value;
+                          _saved = false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 12),
             Text(
               'These defaults apply to new calculations only.',

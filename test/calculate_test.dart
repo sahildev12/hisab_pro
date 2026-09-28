@@ -267,4 +267,68 @@ void main() {
     expect(at96x4.passingRate, Decimal.parse('96'));
     expect(at95x5.amountDeductionRate, Decimal.parse('5'));
   });
+
+  test('rows missing a bracket still contribute their amount', () {
+    final result = calculateSettlement(
+      [
+        RowData(id: '1', name: 'Sb.', amount: '10000', bracket: '50'),
+        RowData(id: '2', name: 'Gw.', amount: '5000', bracket: ''),
+      ],
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+
+    expect(result.totalAmount, Decimal.parse('15000'));
+    expect(result.totalBracket, Decimal.parse('50'));
+    expect(result.netTotalAmount, Decimal.parse('14400'));
+    expect(result.finalBalance, Decimal.parse('9600'));
+  });
+
+  test('rows missing an amount still contribute their bracket', () {
+    final result = calculateSettlement(
+      [
+        RowData(id: '1', name: 'Sb.', amount: '10000', bracket: '50'),
+        RowData(id: '2', name: 'Gw.', amount: '', bracket: '20'),
+      ],
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+
+    expect(result.totalAmount, Decimal.parse('10000'));
+    expect(result.totalBracket, Decimal.parse('70'));
+    expect(result.resultType, ResultType.lene);
+  });
+
+  test('all-empty rows calculate to a balanced zero instead of throwing', () {
+    final result = calculateSettlement(
+      [RowData(id: '1', name: 'Sb.')],
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+
+    expect(result.totalAmount, Decimal.zero);
+    expect(result.totalBracket, Decimal.zero);
+    expect(result.resultType, ResultType.balanced);
+  });
+
+  test('copy message lists partial rows so totals still add up', () {
+    final rows = [
+      RowData(id: '1', name: 'Sb.', amount: '10000', bracket: '50'),
+      RowData(id: '2', name: 'Gw.', amount: '5000', bracket: ''),
+    ];
+    final result = calculateSettlement(
+      rows,
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+    final message = buildPasteCopyMessage(
+      title: 'Partial',
+      rows: rows,
+      result: result,
+    );
+
+    expect(message, contains('Sb.'));
+    expect(message, contains('Gw.'));
+    expect(message, contains('15000 - 600 = 14400'));
+  });
 }

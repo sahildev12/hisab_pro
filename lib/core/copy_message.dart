@@ -5,7 +5,7 @@ import 'package:decimal/decimal.dart';
 import '../models/calculation_result.dart';
 import '../models/row_data.dart';
 import 'format.dart';
-import 'parse_number.dart';
+import 'parse_number.dart' show tryParseDecimal;
 import 'validate.dart';
 
 /// Column width for summary labels (fits COMMISSION + 1 space).
@@ -157,7 +157,7 @@ String buildPasteCopyMessage({
 
 bool _rowHasCopyableNumbers(RowData row) {
   if (isRowEmpty(row)) return false;
-  return tryParseDecimal(row.amount) != null &&
+  return tryParseDecimal(row.amount) != null ||
       tryParseDecimal(row.bracket) != null;
 }
 
@@ -165,20 +165,24 @@ List<RowData> _copyableRows(List<RowData> rows) {
   return rows.where(_rowHasCopyableNumbers).toList();
 }
 
+/// Renders a cell, leaving it blank when the value is missing or unparseable.
+String _cell(String raw) {
+  final parsed = tryParseDecimal(raw);
+  return parsed == null ? '' : formatPlainNumber(parsed);
+}
+
 void _writePasteFormattedRows(StringBuffer buffer, List<RowData> rows) {
   final activeRows = _copyableRows(rows);
   if (activeRows.isEmpty) return;
 
   final bracketWidth = activeRows
-      .map((row) => formatPlainNumber(parseDecimal(row.bracket)).length)
+      .map((row) => _cell(row.bracket).length)
       .fold<int>(0, math.max);
 
   for (final row in activeRows) {
     final name = row.name.trim().padRight(_pasteNameColumnWidth);
-    final amount = formatPlainNumber(parseDecimal(row.amount))
-        .padLeft(_pasteAmountColumnWidth);
-    final bracket =
-        formatPlainNumber(parseDecimal(row.bracket)).padLeft(bracketWidth);
+    final amount = _cell(row.amount).padLeft(_pasteAmountColumnWidth);
+    final bracket = _cell(row.bracket).padLeft(bracketWidth);
     final prefix = '$name$amount';
     final gap = math.max(1, _pasteBracketColumnStart - prefix.length);
     buffer.writeln('$prefix${' ' * gap}( $bracket )');
@@ -197,18 +201,16 @@ void _writeFormattedRows(
       .map((row) => row.name.trim().length)
       .fold<int>(0, math.max);
   final amountWidth = activeRows
-      .map((row) => formatPlainNumber(parseDecimal(row.amount)).length)
+      .map((row) => _cell(row.amount).length)
       .fold<int>(0, math.max);
   final bracketWidth = activeRows
-      .map((row) => formatPlainNumber(parseDecimal(row.bracket)).length)
+      .map((row) => _cell(row.bracket).length)
       .fold<int>(0, math.max);
 
   for (final row in activeRows) {
     final name = row.name.trim().padRight(nameWidth);
-    final amount =
-        formatPlainNumber(parseDecimal(row.amount)).padLeft(amountWidth);
-    final bracket =
-        formatPlainNumber(parseDecimal(row.bracket)).padLeft(bracketWidth);
+    final amount = _cell(row.amount).padLeft(amountWidth);
+    final bracket = _cell(row.bracket).padLeft(bracketWidth);
     if (spacedBrackets) {
       buffer.writeln('$name  $amount  ( $bracket )');
     } else {

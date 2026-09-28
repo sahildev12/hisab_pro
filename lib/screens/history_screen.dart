@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 import '../core/copy_message.dart';
 import '../core/format.dart';
@@ -66,12 +67,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final _searchController = TextEditingController();
   HistoryFilter _filter = HistoryFilter.all;
   HistorySort _sort = HistorySort.newest;
-  HistoryGroupMode _groupMode = HistoryGroupMode.byDate;
+  late HistoryGroupMode _groupMode;
+  DateTime? _filterFrom;
+  DateTime? _filterTo;
   String _persistentHeader = '';
+  Map<String, String> _groupNames = const {};
 
   @override
   void initState() {
     super.initState();
+    // Inside a single group there is nothing to group by, so fall back to dates.
+    _groupMode = widget.groupIdFilter == null
+        ? HistoryGroupMode.byGroup
+        : HistoryGroupMode.byDate;
     _load();
   }
 
@@ -82,56 +90,75 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _load() async {
-    var history = widget.groupIdFilter != null
+    // Only calculated records are listed; in-progress drafts stay out of
+    // history until Calculate is pressed.
+    final history = widget.groupIdFilter != null
         ? await widget.storage.loadGroupHistory(widget.groupIdFilter!)
         : await widget.storage.loadHistory();
-    HistoryEntry? draftEntry;
-    if (widget.groupIdFilter == null) {
-      draftEntry = await widget.storage.loadActiveDraftEntry();
-    } else {
-      final groupDraft = await widget.storage.loadGroupDraft(
-        widget.groupIdFilter!,
-      );
-      if (groupDraft != null && groupDraft.hasData) {
-        draftEntry = groupDraft.toHistoryEntry(
-          id: groupDraft.historyEntryId ?? HistoryEntry.activeDraftId,
-          status: groupDraft.lastView == 'results'
-              ? HistoryEntry.completedStatus
-              : HistoryEntry.draftStatus,
-          savedAt: groupDraft.updatedAt ?? DateTime.now(),
-          updatedAt: groupDraft.updatedAt,
-          groupId: widget.groupIdFilter,
-        );
-      }
-    }
     final header = await widget.storage.loadPersistentHeader();
+    final groups = await widget.storage.loadGroups();
     if (!mounted) return;
     setState(() {
       _persistentHeader = header;
-      _allItems = mergeHistoryWithDraft(
-        history: history,
-        draftEntry: draftEntry,
-      );
+      _groupNames = {for (final group in groups) group.id: group.name};
+      _allItems = mergeHistoryWithDraft(history: history, draftEntry: null);
       _loading = false;
     });
   }
 
-  List<HistoryDisplayItem> get _visibleItems => sortHistoryItems(
-        filterHistoryItems(
-          items: _allItems,
-          filter: _filter,
-          searchQuery: _searchController.text,
-        ),
-        _sort,
+  List<HistoryDisplayItem> get _visibleItems {
+    var items = sortHistoryItems(
+      filterHistoryItems(
+        items: _allItems,
+        filter: _filter,
+        searchQuery: _searchController.text,
+      ),
+      _sort,
+    );
+
+    if (_filterFrom != null || _filterTo != null) {
+      items = items.where(_isWithinDateRange).toList();
+    }
+
+    return items;
+  }
+
+  bool _isWithinDateRange(HistoryDisplayItem item) {
+    final saved = item.entry.savedAt;
+    final day = DateTime(saved.year, saved.month, saved.day);
+
+    if (_filterFrom != null) {
+      final from = DateTime(
+        _filterFrom!.year,
+        _filterFrom!.month,
+        _filterFrom!.day,
       );
+      if (day.isBefore(from)) return false;
+    }
+
+    if (_filterTo != null) {
+      final to = DateTime(
+        _filterTo!.year,
+        _filterTo!.month,
+        _filterTo!.day,
+      );
+      if (day.isAfter(to)) return false;
+    }
+
+    return true;
+  }
 
   List<HistoryDateGroup> get _groups {
-    if (_groupMode == HistoryGroupMode.none) {
-      return [
-        HistoryDateGroup(label: 'All Calculations', items: _visibleItems),
-      ];
+    switch (_groupMode) {
+      case HistoryGroupMode.none:
+        return [
+          HistoryDateGroup(label: 'All Calculations', items: _visibleItems),
+        ];
+      case HistoryGroupMode.byGroup:
+        return groupHistoryByGroup(_visibleItems, groupNames: _groupNames);
+      case HistoryGroupMode.byDate:
+        return groupHistoryByDate(_visibleItems);
     }
-    return groupHistoryByDate(_visibleItems);
   }
 
   Future<void> _delete(HistoryDisplayItem item) async {
@@ -165,33 +192,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Future<void> _clearAllHistory() async {
-    final confirmed = await showHisabProConfirmDialog(
-      context: context,
-      title: 'Clear all history?',
-      message: 'All saved calculations will be removed. This cannot be undone.',
-      confirmLabel: 'Clear',
-      destructive: true,
-    );
-    if (confirmed != true) return;
-
-    await widget.storage.saveHistory([]);
-    await widget.storage.clearDraft();
-    if (!mounted) return;
-    await _load();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('History cleared'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
   void _edit(HistoryDisplayItem item) {
     widget.onEditEntry(item.entry);
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   void _view(HistoryDisplayItem item) {
@@ -208,34 +214,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ),
       ),
     );
-  }
-
-  Future<void> _duplicate(HistoryDisplayItem item) async {
-    final source = item.entry;
-    final duplicated = source.copyWith(
-      id: HistoryEntry.activeDraftId,
-      title: item.listTitle,
-      status: HistoryEntry.draftStatus,
-      savedAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-      rows: source.rows.map((row) => row.copyWith()).toList(),
-    );
-
-    await widget.storage.saveDraft(
-      DraftState(
-        title: item.listTitle,
-        rows: duplicated.rows,
-        passingRate: duplicated.passingRate,
-        amountDeductionRate: duplicated.amountDeductionRate,
-        commissionTracking: duplicated.commissionTracking,
-        lastView: 'main',
-        updatedAt: DateTime.now(),
-      ),
-    );
-
-    if (!mounted) return;
-    widget.onEditEntry(duplicated);
-    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<void> _share(HistoryDisplayItem item) async {
@@ -276,55 +254,32 @@ class _HistoryScreenState extends State<HistoryScreen> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (sheetContext) {
-        return _HistoryFilterSheet(
-          sort: _sort,
-          groupMode: _groupMode,
-          onApply: (sort, groupMode) {
+        return _HistoryDateRangeSheet(
+          from: _filterFrom,
+          to: _filterTo,
+          onApply: (from, to) {
             setState(() {
-              _sort = sort;
-              _groupMode = groupMode;
+              _filterFrom = from;
+              _filterTo = to;
             });
           },
-          onClearHistory: () async {
-            Navigator.pop(sheetContext);
-            await _clearAllHistory();
+          onClear: () {
+            setState(() {
+              _filterFrom = null;
+              _filterTo = null;
+            });
           },
         );
       },
     );
   }
 
-  void _openCardMenu(HistoryDisplayItem item) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return _HistoryCardMenuSheet(
-          onView: () {
-            Navigator.pop(sheetContext);
-            _view(item);
-          },
-          onEdit: () {
-            Navigator.pop(sheetContext);
-            _edit(item);
-          },
-          onDuplicate: () {
-            Navigator.pop(sheetContext);
-            _duplicate(item);
-          },
-          onShare: item.result == null
-              ? null
-              : () {
-                  Navigator.pop(sheetContext);
-                  _share(item);
-                },
-          onDelete: () {
-            Navigator.pop(sheetContext);
-            _delete(item);
-          },
-        );
-      },
-    );
+  String _cardTimeLabel(HistoryDisplayItem item) {
+    final headerHasDate = widget.groupIdFilter != null ||
+        _groupMode == HistoryGroupMode.byDate;
+    return headerHasDate
+        ? formatHistoryCardTime(item.entry.savedAt)
+        : formatHistoryCardDate(item.entry.savedAt);
   }
 
   @override
@@ -339,6 +294,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildHeader(),
+                if (!_loading && _allItems.isNotEmpty) _buildTotalBanner(),
                 if (_searchOpen) _buildSearchField(),
                 _buildFilterBar(),
                 Expanded(
@@ -352,7 +308,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  String? get _filteredGroupName {
+    final groupId = widget.groupIdFilter;
+    if (groupId == null) return null;
+    return _groupNames[groupId];
+  }
+
+  bool _shouldHideCardTitle(HistoryDisplayItem item) {
+    if (widget.groupIdFilter != null) return true;
+    if (_groupMode != HistoryGroupMode.byGroup) return false;
+    final groupId = item.entry.groupId;
+    if (groupId == null) return false;
+    return _groupNames[groupId] == item.listTitle;
+  }
+
   Widget _buildHeader() {
+    final groupName = _filteredGroupName;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
       child: Row(
@@ -373,7 +345,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'History',
+                    groupName ?? 'History',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.inter(
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
@@ -383,7 +357,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   ),
                   const SizedBox(height: 1),
                   Text(
-                    'Your calculations, always saved',
+                    groupName == null
+                        ? 'Every change, kept for $historyRetentionDays days'
+                        : 'History • Last $historyRetentionDays days',
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       color: _HistoryColors.muted,
@@ -401,10 +377,67 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
           _headerIconButton(
             icon: Icons.tune_rounded,
-            tooltip: 'Filter & sort',
+            tooltip: 'Date range',
             onPressed: _openFilterSheet,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTotalBanner() {
+    final total = historyTotalAmount(_visibleItems);
+    final label = widget.groupIdFilter == null
+        ? 'Total Amount • Last $historyRetentionDays days'
+        : 'Total Amount';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_pagePadding, 10, _pagePadding, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _HistoryColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: const BoxDecoration(
+                color: _HistoryColors.actionBg,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.summarize_outlined,
+                size: 17,
+                color: _HistoryColors.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: _HistoryColors.muted,
+                ),
+              ),
+            ),
+            Text(
+              formatMoney(total, showCurrency: true),
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: _HistoryColors.navy,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -463,7 +496,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildFilterBar() {
     const filters = <HistoryFilter, String>{
       HistoryFilter.all: 'All',
-      HistoryFilter.drafts: 'Drafts',
       HistoryFilter.lene: 'Lene Aaj',
       HistoryFilter.dene: 'Dene Aaj',
     };
@@ -549,33 +581,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildDateHeader(HistoryDateGroup group) {
-    final count = group.items.length;
-    final countLabel = count == 1 ? '1 entry' : '$count entries';
+    final total = historyTotalAmount(group.items);
 
-    return Row(
-      children: [
-        Text(
-          group.label,
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: _HistoryColors.navy,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              group.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: _HistoryColors.navy,
+                height: 1.2,
+              ),
+            ),
           ),
-        ),
-        const Spacer(),
-        Text(
-          countLabel,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            color: _HistoryColors.muted,
+          Text(
+            'TOTAL ${formatMoney(total, showCurrency: true)}',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: _HistoryColors.navy,
+              height: 1.2,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildHistoryCard(HistoryDisplayItem item) {
     final style = _statusStyle(item);
+    final hideTitle = _shouldHideCardTitle(item);
+    final canShare = item.result != null;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -590,76 +633,59 @@ class _HistoryScreenState extends State<HistoryScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Stack(
-                clipBehavior: Clip.none,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _statusIcon(item, style),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 96),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.listTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.inter(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: _HistoryColors.navy,
-                                  height: 1.2,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                formatHistoryCardDate(item.entry.savedAt),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: _HistoryColors.muted,
-                                  height: 1.2,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    width: 96,
+                  _statusIcon(item, style),
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            _statusBadge(item, style),
-                            _cardMenuButton(item),
-                          ],
+                        if (!hideTitle) ...[
+                          Text(
+                            item.listTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: _HistoryColors.navy,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                        ],
+                        Text(
+                          _cardTimeLabel(item),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            fontSize: hideTitle ? 14 : 12,
+                            fontWeight: hideTitle
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            color: hideTitle
+                                ? _HistoryColors.navy
+                                : _HistoryColors.muted,
+                            height: 1.2,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         _amountDisplay(item),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  if (!item.isDraft) _statusBadge(item, style),
                 ],
               ),
               const SizedBox(height: 10),
               const Divider(height: 1, color: _HistoryColors.divider),
               const SizedBox(height: 8),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _rowCountBadge(item.rowCount),
-                  const Spacer(),
                   _actionButton(
                     label: 'View',
                     icon: Icons.visibility_outlined,
@@ -670,6 +696,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     label: 'Edit',
                     icon: Icons.edit_outlined,
                     onTap: () => _edit(item),
+                  ),
+                  const SizedBox(width: 6),
+                  _actionButton(
+                    label: 'Share',
+                    icon: Icons.share_outlined,
+                    onTap: canShare ? () => _share(item) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _actionButton(
+                    label: 'Delete',
+                    icon: Icons.delete_outline,
+                    onTap: () => _delete(item),
+                    destructive: true,
                   ),
                 ],
               ),
@@ -703,32 +742,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _cardMenuButton(HistoryDisplayItem item) {
-    return SizedBox(
-      width: 28,
-      height: 22,
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: InkWell(
-          onTap: () => _openCardMenu(item),
-          borderRadius: BorderRadius.circular(6),
-          child: const Padding(
-            padding: EdgeInsets.only(left: 4),
-            child: Icon(
-              Icons.more_vert_rounded,
-              size: 18,
-              color: _HistoryColors.muted,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _statusBadge(HistoryDisplayItem item, _StatusStyle style) {
-    final label = item.isDraft
-        ? 'DRAFT'
-        : item.result?.resultType.copyLabel ?? '—';
+    if (item.isDraft) return const SizedBox.shrink();
+
+    final label = item.result?.resultType.copyLabel ?? '—';
 
     return Container(
       height: 22,
@@ -738,16 +755,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
         color: style.badgeBg,
         borderRadius: BorderRadius.circular(11),
       ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.fade,
-        softWrap: false,
-        style: GoogleFonts.inter(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: style.badgeText,
-          letterSpacing: 0.1,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: style.badgeText,
+            letterSpacing: 0.1,
+          ),
         ),
       ),
     );
@@ -758,56 +778,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ? '—'
         : formatMoney(item.result!.displayAmount, showCurrency: true);
 
-    return SizedBox(
-      width: double.infinity,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerRight,
-        child: Text(
-          text,
-          textAlign: TextAlign.right,
-          maxLines: 1,
-          style: GoogleFonts.inter(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: item.result == null
-                ? _HistoryColors.muted
-                : _HistoryColors.navy,
-            height: 1.1,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _rowCountBadge(int count) {
-    final label = count == 1 ? '1 row' : '$count rows';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: _HistoryColors.rowBadgeBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _HistoryColors.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.grid_view_rounded,
-            size: 12,
-            color: _HistoryColors.muted,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: _HistoryColors.muted,
-            ),
-          ),
-        ],
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.inter(
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        color: item.result == null ? _HistoryColors.muted : _HistoryColors.navy,
+        height: 1.1,
       ),
     );
   }
@@ -815,27 +794,37 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _actionButton({
     required String label,
     required IconData icon,
-    required VoidCallback onTap,
+    VoidCallback? onTap,
+    bool destructive = false,
   }) {
+    final enabled = onTap != null;
+    final color =
+        destructive ? _HistoryColors.dene : _HistoryColors.primary;
+    final bg = destructive ? _HistoryColors.deneBg : _HistoryColors.actionBg;
+
     return Material(
-      color: _HistoryColors.actionBg,
+      color: enabled ? bg : _HistoryColors.rowBadgeBg,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: _HistoryColors.primary),
+              Icon(
+                icon,
+                size: 14,
+                color: enabled ? color : _HistoryColors.muted,
+              ),
               const SizedBox(width: 4),
               Text(
                 label,
                 style: GoogleFonts.inter(
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: _HistoryColors.primary,
+                  color: enabled ? color : _HistoryColors.muted,
                 ),
               ),
             ],
@@ -911,6 +900,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     String message;
     if (_searchController.text.trim().isNotEmpty) {
       message = 'No matching calculations found.';
+    } else if (_filterFrom != null || _filterTo != null) {
+      message = 'No calculations in this date range.';
     } else if (_filter == HistoryFilter.drafts) {
       message = 'No drafts';
     } else if (_filter == HistoryFilter.lene) {
@@ -1012,128 +1003,69 @@ class _StatusStyle {
   final Color badgeText;
 }
 
-class _HistoryCardMenuSheet extends StatelessWidget {
-  const _HistoryCardMenuSheet({
-    required this.onView,
-    required this.onEdit,
-    required this.onDuplicate,
-    required this.onShare,
-    required this.onDelete,
-  });
-
-  final VoidCallback onView;
-  final VoidCallback onEdit;
-  final VoidCallback onDuplicate;
-  final VoidCallback? onShare;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _menuTile(
-              icon: Icons.visibility_outlined,
-              label: 'View Details',
-              onTap: onView,
-            ),
-            _menuTile(
-              icon: Icons.edit_outlined,
-              label: 'Edit',
-              onTap: onEdit,
-            ),
-            _menuTile(
-              icon: Icons.copy_all_outlined,
-              label: 'Duplicate',
-              onTap: onDuplicate,
-            ),
-            if (onShare != null)
-              _menuTile(
-                icon: Icons.share_outlined,
-                label: 'Share',
-                onTap: onShare!,
-              ),
-            const Divider(height: 1, color: _HistoryColors.divider),
-            _menuTile(
-              icon: Icons.delete_outline,
-              label: 'Delete',
-              onTap: onDelete,
-              destructive: true,
-            ),
-            const SizedBox(height: 6),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _menuTile({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool destructive = false,
-  }) {
-    final color = destructive ? _HistoryColors.dene : _HistoryColors.navy;
-    final iconColor = destructive ? _HistoryColors.dene : _HistoryColors.muted;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: iconColor),
-            const SizedBox(width: 14),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HistoryFilterSheet extends StatefulWidget {
-  const _HistoryFilterSheet({
-    required this.sort,
-    required this.groupMode,
+class _HistoryDateRangeSheet extends StatefulWidget {
+  const _HistoryDateRangeSheet({
+    required this.from,
+    required this.to,
     required this.onApply,
-    required this.onClearHistory,
+    required this.onClear,
   });
 
-  final HistorySort sort;
-  final HistoryGroupMode groupMode;
-  final void Function(HistorySort sort, HistoryGroupMode groupMode) onApply;
-  final VoidCallback onClearHistory;
+  final DateTime? from;
+  final DateTime? to;
+  final void Function(DateTime? from, DateTime? to) onApply;
+  final VoidCallback onClear;
 
   @override
-  State<_HistoryFilterSheet> createState() => _HistoryFilterSheetState();
+  State<_HistoryDateRangeSheet> createState() => _HistoryDateRangeSheetState();
 }
 
-class _HistoryFilterSheetState extends State<_HistoryFilterSheet> {
-  late HistorySort _sort = widget.sort;
-  late HistoryGroupMode _groupMode = widget.groupMode;
+class _HistoryDateRangeSheetState extends State<_HistoryDateRangeSheet> {
+  DateTime? _from;
+  DateTime? _to;
+
+  @override
+  void initState() {
+    super.initState();
+    _from = widget.from;
+    _to = widget.to;
+  }
+
+  Future<void> _pickDate({required bool isFrom}) async {
+    final initial = isFrom
+        ? (_from ?? DateTime.now())
+        : (_to ?? _from ?? DateTime.now());
+    final first = DateTime.now().subtract(const Duration(days: 365));
+    final last = DateTime.now().add(const Duration(days: 1));
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: first,
+      lastDate: last,
+      helpText: isFrom ? 'From date' : 'To date',
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      if (isFrom) {
+        _from = picked;
+        if (_to != null && _to!.isBefore(picked)) {
+          _to = picked;
+        }
+      } else {
+        _to = picked;
+        if (_from != null && _from!.isAfter(picked)) {
+          _from = picked;
+        }
+      }
+    });
+  }
+
+  String _formatPickerDate(DateTime? date) {
+    if (date == null) return 'Select date';
+    return DateFormat('d MMM yyyy').format(date);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1156,7 +1088,7 @@ class _HistoryFilterSheetState extends State<_HistoryFilterSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Sort & Filter',
+                'Date Range',
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -1164,66 +1096,33 @@ class _HistoryFilterSheetState extends State<_HistoryFilterSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                'Sort by',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _HistoryColors.muted,
-                ),
+              _dateField(
+                label: 'From',
+                value: _formatPickerDate(_from),
+                onTap: () => _pickDate(isFrom: true),
               ),
-              const SizedBox(height: 8),
-              _radioTile(
-                label: 'Date (Newest first)',
-                selected: _sort == HistorySort.newest,
-                onTap: () => setState(() => _sort = HistorySort.newest),
-              ),
-              _radioTile(
-                label: 'Date (Oldest first)',
-                selected: _sort == HistorySort.oldest,
-                onTap: () => setState(() => _sort = HistorySort.oldest),
-              ),
-              _radioTile(
-                label: 'Amount (High to Low)',
-                selected: _sort == HistorySort.amountHigh,
-                onTap: () => setState(() => _sort = HistorySort.amountHigh),
-              ),
-              _radioTile(
-                label: 'Amount (Low to High)',
-                selected: _sort == HistorySort.amountLow,
-                onTap: () => setState(() => _sort = HistorySort.amountLow),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Group by',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _HistoryColors.muted,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _radioTile(
-                label: 'Date (Day)',
-                selected: _groupMode == HistoryGroupMode.byDate,
-                onTap: () => setState(() => _groupMode = HistoryGroupMode.byDate),
-              ),
-              _radioTile(
-                label: 'No Grouping',
-                selected: _groupMode == HistoryGroupMode.none,
-                onTap: () => setState(() => _groupMode = HistoryGroupMode.none),
+              const SizedBox(height: 10),
+              _dateField(
+                label: 'To',
+                value: _formatPickerDate(_to),
+                onTap: () => _pickDate(isFrom: false),
               ),
               const SizedBox(height: 16),
               SizedBox(
                 height: 48,
                 child: ElevatedButton(
-                  onPressed: () {
-                    widget.onApply(_sort, _groupMode);
-                    Navigator.pop(context);
-                  },
+                  onPressed: _from == null && _to == null
+                      ? null
+                      : () {
+                          widget.onApply(_from, _to);
+                          Navigator.pop(context);
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _HistoryColors.primary,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        _HistoryColors.chipInactiveBg,
+                    disabledForegroundColor: _HistoryColors.muted,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -1238,23 +1137,23 @@ class _HistoryFilterSheetState extends State<_HistoryFilterSheet> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: widget.onClearHistory,
-                icon: const Icon(
-                  Icons.delete_outline,
-                  size: 18,
-                  color: _HistoryColors.dene,
-                ),
-                label: Text(
-                  'Clear History',
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: _HistoryColors.dene,
+              if (_from != null || _to != null || widget.from != null) ...[
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    widget.onClear();
+                    Navigator.pop(context);
+                  },
+                  child: Text(
+                    'Clear dates',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _HistoryColors.muted,
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
@@ -1262,35 +1161,58 @@ class _HistoryFilterSheetState extends State<_HistoryFilterSheet> {
     );
   }
 
-  Widget _radioTile({
+  Widget _dateField({
     required String label,
-    required bool selected,
+    required String value,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
-              size: 20,
-              color: selected ? _HistoryColors.primary : _HistoryColors.muted,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: _HistoryColors.navy,
+    final hasValue = value != 'Select date';
+
+    return Material(
+      color: _HistoryColors.chipInactiveBg,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _HistoryColors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: hasValue
+                            ? _HistoryColors.navy
+                            : _HistoryColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              Icon(
+                Icons.calendar_today_rounded,
+                size: 18,
+                color: hasValue
+                    ? _HistoryColors.primary
+                    : _HistoryColors.muted,
+              ),
+            ],
+          ),
         ),
       ),
     );

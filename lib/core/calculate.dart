@@ -34,6 +34,9 @@ ResultType _resolveResultType(Decimal roundedDifference) {
 /// When [commissionTracking] is true (paid later), commission is not deducted
 /// from the main total. When false (paid daily), commission is subtracted
 /// before comparing to passing.
+///
+/// Partially filled rows are tolerated: any field that is blank or unparseable
+/// contributes zero, so a result is always produced for whatever was entered.
 CalculationResult calculateSettlement(
   List<RowData> rows, {
   required Decimal passingRate,
@@ -43,8 +46,10 @@ CalculationResult calculateSettlement(
 }) {
   final activeRows = rows.where((row) => !isRowEmpty(row)).toList();
 
-  final amounts = activeRows.map((row) => parseDecimal(row.amount));
-  final brackets = activeRows.map((row) => parseDecimal(row.bracket));
+  final amounts =
+      activeRows.map((row) => tryParseDecimal(row.amount) ?? Decimal.zero);
+  final brackets =
+      activeRows.map((row) => tryParseDecimal(row.bracket) ?? Decimal.zero);
 
   final totalAmount = _sumDecimals(amounts);
   final commissionEarned =

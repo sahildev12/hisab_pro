@@ -58,6 +58,8 @@ class CalculationRatesControl extends StatelessWidget {
 
     this.commissionTracking = false,
 
+    this.commissionEnabled = true,
+
     this.onCommissionTrackingChanged,
 
     RateUsageService? rateUsageService,
@@ -75,6 +77,8 @@ class CalculationRatesControl extends StatelessWidget {
   final ValueChanged<bool>? onDeductionLinkChanged;
 
   final bool commissionTracking;
+
+  final bool commissionEnabled;
 
   final ValueChanged<bool>? onCommissionTrackingChanged;
 
@@ -570,7 +574,7 @@ class CalculationRatesControl extends StatelessWidget {
 
               _rateTile(
 
-                label: 'Commission / Deduction',
+                label: commissionEnabled ? 'Commission / Deduction' : 'Deduction',
 
                 rate: rates.amountDeductionRate,
 
@@ -582,7 +586,7 @@ class CalculationRatesControl extends StatelessWidget {
 
           ),
 
-          if (onCommissionTrackingChanged != null) ...[
+          if (commissionEnabled && onCommissionTrackingChanged != null) ...[
 
             const SizedBox(height: 8),
 

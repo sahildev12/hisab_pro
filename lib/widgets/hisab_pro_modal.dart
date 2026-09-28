@@ -211,6 +211,220 @@ Future<bool?> showHisabProConfirmDialog({
   );
 }
 
+/// Themed single-line text prompt, matching confirm dialog styling.
+Future<String?> showHisabProPromptDialog({
+  required BuildContext context,
+  required String title,
+  String? message,
+  String hintText = '',
+  String cancelLabel = 'Cancel',
+  String confirmLabel = 'Add',
+  String initialValue = '',
+  List<String> recentOptions = const [],
+}) {
+  return showHisabProModal<String>(
+    context: context,
+    builder: (dialogContext) {
+      return _HisabProPromptDialog(
+        title: title,
+        message: message,
+        hintText: hintText,
+        cancelLabel: cancelLabel,
+        confirmLabel: confirmLabel,
+        initialValue: initialValue,
+        recentOptions: recentOptions,
+      );
+    },
+  );
+}
+
+class _HisabProPromptDialog extends StatefulWidget {
+  const _HisabProPromptDialog({
+    required this.title,
+    this.message,
+    required this.hintText,
+    required this.cancelLabel,
+    required this.confirmLabel,
+    required this.initialValue,
+    this.recentOptions = const [],
+  });
+
+  final String title;
+  final String? message;
+  final String hintText;
+  final String cancelLabel;
+  final String confirmLabel;
+  final String initialValue;
+  final List<String> recentOptions;
+
+  @override
+  State<_HisabProPromptDialog> createState() => _HisabProPromptDialogState();
+}
+
+class _HisabProPromptDialogState extends State<_HisabProPromptDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit([String? value]) =>
+      Navigator.pop(context, value ?? _controller.text);
+
+  void _pickRecent(String name) {
+    _controller.text = name;
+    _submit(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return HisabProModalCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            widget.title,
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: HisabProModalColors.navy,
+            ),
+          ),
+          if (widget.message != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              widget.message!,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                height: 1.45,
+                color: HisabProModalColors.muted,
+              ),
+            ),
+          ],
+          if (widget.recentOptions.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              'Recent names',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: HisabProModalColors.muted,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: widget.recentOptions.map((name) {
+                return ActionChip(
+                  label: Text(name),
+                  labelStyle: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: HisabProModalColors.navy,
+                  ),
+                  backgroundColor: HisabProModalColors.chipBg,
+                  side: const BorderSide(color: HisabProModalColors.border),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  onPressed: () => _pickRecent(name),
+                );
+              }).toList(),
+            ),
+          ],
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+            decoration: InputDecoration(
+              hintText: widget.hintText,
+              filled: true,
+              fillColor: HisabProModalColors.chipBg,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: HisabProModalColors.inputBorder),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: HisabProModalColors.primary),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: HisabProModalColors.navy,
+                      side: const BorderSide(
+                        color: HisabProModalColors.inputBorder,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      widget.cancelLabel,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: HisabProModalColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      widget.confirmLabel,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class HisabProModalCard extends StatelessWidget {
   const HisabProModalCard({
     super.key,

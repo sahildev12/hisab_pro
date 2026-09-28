@@ -27,7 +27,7 @@ enum HistorySort {
   amountLow,
 }
 
-enum HistoryGroupMode { byDate, none }
+enum HistoryGroupMode { byGroup, byDate, none }
 
 /// Title for history list cards — never appends "(Draft)".
 String historyListTitle(HistoryEntry entry, {required bool isDraft}) {
@@ -96,6 +96,16 @@ class HistoryDisplayItem {
     }
     return HistoryDisplayItem(entry: entry, result: result);
   }
+}
+
+/// Sum of the Total Amount of every calculation in [items].
+///
+/// Entries that could not be calculated contribute nothing.
+Decimal historyTotalAmount(List<HistoryDisplayItem> items) {
+  return items.fold(
+    Decimal.zero,
+    (sum, item) => sum + (item.result?.totalAmount ?? Decimal.zero),
+  );
 }
 
 class HistoryDateGroup {
@@ -170,6 +180,42 @@ List<HistoryDateGroup> groupHistoryByDate(List<HistoryDisplayItem> items) {
           items: groups[label]!,
         ),
       )
+      .toList();
+}
+
+/// Buckets history under the calculation group it belongs to.
+///
+/// [groupNames] maps group ids to display names; unknown ids and entries with
+/// no group fall into a single "Other Calculations" bucket.
+List<HistoryDateGroup> groupHistoryByGroup(
+  List<HistoryDisplayItem> items, {
+  required Map<String, String> groupNames,
+}) {
+  const ungrouped = 'Other Calculations';
+
+  final buckets = <String, List<HistoryDisplayItem>>{};
+  final order = <String>[];
+
+  for (final item in items) {
+    final groupId = item.entry.groupId;
+    final label = groupId == null ? ungrouped : groupNames[groupId] ?? ungrouped;
+    buckets.putIfAbsent(label, () {
+      order.add(label);
+      return [];
+    });
+    buckets[label]!.add(item);
+  }
+
+  // Keep the catch-all bucket last so real groups stay on top.
+  order.sort((a, b) {
+    if (a == b) return 0;
+    if (a == ungrouped) return 1;
+    if (b == ungrouped) return -1;
+    return 0;
+  });
+
+  return order
+      .map((label) => HistoryDateGroup(label: label, items: buckets[label]!))
       .toList();
 }
 

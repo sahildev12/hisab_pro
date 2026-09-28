@@ -632,10 +632,6 @@ class _MainScreenState extends State<MainScreen> {
 
           onSettingsChanged: widget.onSettingsChanged,
 
-          onOpenHistoryEntry: widget.onOpenHistoryEntry,
-
-          onDeleteHistoryEntry: widget.onDeleteHistoryEntry,
-
         ),
 
       ),

@@ -18,16 +18,26 @@ const _persistentHeaderKey = 'hisabpro-persistent-header';
 const _commissionBalancesKey = 'hisabpro-commission-balances';
 const _groupsKey = 'hisabpro-groups';
 const _groupDraftPrefix = 'hisabpro-group-draft-';
+const _groupUndoPrefix = 'hisabpro-group-undo-';
+
+/// Steps kept per direction for undo/redo. Each keystroke is one step, so this
+/// is deliberately generous while still bounding what gets persisted.
+const undoHistoryLimit = 60;
 const _pasteCalculationDraftKey = 'hisabpro-paste-calculation-draft';
 const _pasteRecentsKey = 'hisabpro-paste-recents';
 const pasteRecentLimit = 25;
-const historyRetentionDays = 35;
+const historyRetentionDays = 31;
+
+/// Safety cap so that keeping a record of every calculation cannot grow the
+/// stored history without bound.
+const historyEntryLimit = 1000;
 
 class AppSettings {
   const AppSettings({
     required this.defaultPassingRate,
     required this.defaultAmountDeductionRate,
     this.defaultCommissionTracking = false,
+    this.commissionEnabled = false,
     this.customEntryNames = const [],
     this.darkMode = false,
   });
@@ -35,6 +45,11 @@ class AppSettings {
   final Decimal defaultPassingRate;
   final Decimal defaultAmountDeductionRate;
   final bool defaultCommissionTracking;
+
+  /// Master switch for the commission feature. When false the deduction rate
+  /// still applies to the total, but commission balances are neither tracked
+  /// nor shown anywhere in the app.
+  final bool commissionEnabled;
   final List<String> customEntryNames;
   final bool darkMode;
 
@@ -42,6 +57,7 @@ class AppSettings {
         'defaultPassingRate': defaultPassingRate.toString(),
         'defaultAmountDeductionRate': defaultAmountDeductionRate.toString(),
         'defaultCommissionTracking': defaultCommissionTracking,
+        'commissionEnabled': commissionEnabled,
         'customEntryNames': customEntryNames,
         'darkMode': darkMode,
       };
@@ -60,6 +76,7 @@ class AppSettings {
         ),
         defaultCommissionTracking:
             json['defaultCommissionTracking'] as bool? ?? false,
+        commissionEnabled: json['commissionEnabled'] as bool? ?? false,
         customEntryNames: custom,
         darkMode: json['darkMode'] as bool? ?? false,
       );
@@ -83,6 +100,7 @@ class AppSettings {
     Decimal? defaultPassingRate,
     Decimal? defaultAmountDeductionRate,
     bool? defaultCommissionTracking,
+    bool? commissionEnabled,
     List<String>? customEntryNames,
     bool? darkMode,
   }) {
@@ -92,6 +110,7 @@ class AppSettings {
           defaultAmountDeductionRate ?? this.defaultAmountDeductionRate,
       defaultCommissionTracking:
           defaultCommissionTracking ?? this.defaultCommissionTracking,
+      commissionEnabled: commissionEnabled ?? this.commissionEnabled,
       customEntryNames: customEntryNames ?? this.customEntryNames,
       darkMode: darkMode ?? this.darkMode,
     );
@@ -222,6 +241,16 @@ class DraftState {
       originalPastedText: originalPastedText ?? this.originalPastedText,
     );
   }
+}
+
+/// Undo and redo snapshots for one group, newest step last.
+class UndoHistory {
+  const UndoHistory({this.undo = const [], this.redo = const []});
+
+  final List<List<RowData>> undo;
+  final List<List<RowData>> redo;
+
+  bool get isEmpty => undo.isEmpty && redo.isEmpty;
 }
 
 class StorageService {
@@ -433,6 +462,9 @@ class StorageService {
       history.insert(0, entry);
     }
     history.sort((a, b) => b.savedAt.compareTo(a.savedAt));
+    if (history.length > historyEntryLimit) {
+      history.removeRange(historyEntryLimit, history.length);
+    }
     await saveHistory(history);
     if (entry.groupId != null) {
       await _registerHistoryOnGroup(entry.groupId!, entry);
@@ -624,6 +656,7 @@ class StorageService {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_groupDraftPrefix$groupId');
+    await prefs.remove('$_groupUndoPrefix$groupId');
   }
 
   Future<DraftState?> loadGroupDraft(
@@ -658,6 +691,67 @@ class StorageService {
   Future<void> clearGroupDraft(String groupId) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_groupDraftPrefix$groupId');
+  }
+
+  Future<UndoHistory> loadGroupUndoHistory(String groupId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_groupUndoPrefix$groupId');
+    if (raw == null || raw.isEmpty) return const UndoHistory();
+
+    try {
+      final jsonMap = jsonDecode(raw) as Map<String, dynamic>;
+      return UndoHistory(
+        undo: _decodeSnapshots(jsonMap['undo']),
+        redo: _decodeSnapshots(jsonMap['redo']),
+      );
+    } catch (_) {
+      return const UndoHistory();
+    }
+  }
+
+  Future<void> saveGroupUndoHistory(
+    String groupId, {
+    required List<List<RowData>> undo,
+    required List<List<RowData>> redo,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_groupUndoPrefix$groupId';
+    if (undo.isEmpty && redo.isEmpty) {
+      await prefs.remove(key);
+      return;
+    }
+    await prefs.setString(
+      key,
+      jsonEncode({
+        'undo': _encodeSnapshots(undo),
+        'redo': _encodeSnapshots(redo),
+      }),
+    );
+  }
+
+  Future<void> clearGroupUndoHistory(String groupId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_groupUndoPrefix$groupId');
+  }
+
+  List<List<Map<String, dynamic>>> _encodeSnapshots(
+    List<List<RowData>> snapshots,
+  ) {
+    return snapshots
+        .map((rows) => rows.map((row) => row.toJson()).toList())
+        .toList();
+  }
+
+  List<List<RowData>> _decodeSnapshots(Object? raw) {
+    if (raw is! List) return [];
+    return raw
+        .whereType<List<dynamic>>()
+        .map(
+          (rows) => rows
+              .map((row) => RowData.fromJson(row as Map<String, dynamic>))
+              .toList(),
+        )
+        .toList();
   }
 
   Future<List<HistoryEntry>> loadGroupHistory(String groupId) async {

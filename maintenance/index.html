@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>HisabPro — AWS Maintenance</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%23232f3e' width='32' height='32' rx='6'/%3E%3Cpath fill='%23ff9900' d='M8 20l4-10h2l4 10h-2.2l-.8-2.2H11l-.8 2.2H8zm3.2-4h3.6l-1.8-4.8L11.2 16z'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --aws-navy: #232f3e;
+      --aws-navy-light: #2a3f54;
+      --aws-orange: #ff9900;
+      --aws-orange-dark: #ec7211;
+      --aws-text: #16191f;
+      --aws-muted: #5f6b7a;
+      --aws-border: #d5dbdb;
+      --aws-bg: #f2f3f3;
+      --aws-white: #ffffff;
+      --aws-green: #1d8102;
+      --aws-yellow: #f2cd54;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Amazon Ember", "Helvetica Neue", Arial, sans-serif;
+      background: var(--aws-bg);
+      color: var(--aws-text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    .top-bar {
+      background: var(--aws-navy);
+      color: #fff;
+      padding: 0 24px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      border-bottom: 3px solid var(--aws-orange);
+    }
+
+    .top-bar .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .top-bar .region {
+      color: #aab7b8;
+      font-size: 12px;
+    }
+
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    .card {
+      background: var(--aws-white);
+      border: 1px solid var(--aws-border);
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 28px 28px 20px;
+      border-bottom: 1px solid var(--aws-border);
+    }
+
+    .top-logo {
+      height: 28px;
+      width: auto;
+      display: block;
+      filter: brightness(0) invert(1);
+    }
+
+    .aws-logo {
+      height: 44px;
+      width: auto;
+      margin-bottom: 20px;
+      display: block;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff8e6;
+      border: 1px solid #f2cd54;
+      color: #8a6d00;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 6px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--aws-yellow);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--aws-navy);
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: var(--aws-muted);
+    }
+
+    .card-body { padding: 24px 28px 28px; }
+
+    .message {
+      font-size: 15px;
+      color: var(--aws-text);
+      margin-bottom: 20px;
+    }
+
+    .info-grid {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .info-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 12px;
+      font-size: 14px;
+      padding: 10px 0;
+      border-bottom: 1px solid #eef0f1;
+    }
+
+    .info-row:last-child { border-bottom: none; }
+
+    .info-label {
+      color: var(--aws-muted);
+      font-weight: 600;
+    }
+
+    .info-value { color: var(--aws-text); }
+
+    .backup-box {
+      background: linear-gradient(135deg, #232f3e 0%, #2a3f54 100%);
+      border-radius: 8px;
+      padding: 24px;
+      color: #fff;
+      text-align: center;
+    }
+
+    .backup-box h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .backup-box p {
+      font-size: 14px;
+      color: #d5dbdb;
+      margin-bottom: 20px;
+      max-width: 420px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .btn-backup {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--aws-orange);
+      color: #111;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+      padding: 14px 28px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.1s ease;
+      box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    }
+
+    .btn-backup:hover {
+      background: var(--aws-orange-dark);
+      transform: translateY(-1px);
+    }
+
+    .btn-backup svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .footer-note {
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--aws-muted);
+      text-align: center;
+    }
+
+    .footer-note code {
+      background: #eef0f1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+
+    @media (max-width: 520px) {
+      .info-row { grid-template-columns: 1fr; gap: 4px; }
+      h1 { font-size: 22px; }
+      .card-header, .card-body { padding-left: 20px; padding-right: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top-bar">
+    <div class="brand">
+      <img
+        class="top-logo"
+        src="https://upload.wikimedia.org/wikipedia/commons/9/93/Amazon_Web_Services_Logo.svg"
+        alt="Amazon Web Services"
+        width="84"
+        height="50"
+      />
+    </div>
+    <span class="region">ap-south-1 · Mumbai</span>
+  </header>
+
+  <main class="wrap">
+    <article class="card">
+      <header class="card-header">
+        <img
+          class="aws-logo"
+          src="https://upload.wikimedia.org/wikipedia/commons/9/93/Amazon_Web_Services_Logo.svg"
+          alt="Amazon Web Services"
+          width="120"
+          height="72"
+        />
+
+        <div class="status-pill">
+          <span class="status-dot" aria-hidden="true"></span>
+          Maintenance in progress
+        </div>
+
+        <h1>HisabPro primary server unavailable</h1>
+        <p class="subtitle">Scheduled maintenance on our AWS-hosted production environment</p>
+      </header>
+
+      <div class="card-body">
+        <p class="message">
+          Our <strong>primary application server</strong> on Amazon Web Services is currently
+          undergoing planned maintenance. HisabPro is temporarily unavailable on this URL
+          while we complete infrastructure updates.
+        </p>
+
+        <div class="info-grid">
+          <div class="info-row">
+            <span class="info-label">Service</span>
+            <span class="info-value">HisabPro Web Application</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Provider</span>
+            <span class="info-value">Amazon Web Services (AWS)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Region</span>
+            <span class="info-value">Asia Pacific (Mumbai) — ap-south-1</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="info-value">Under maintenance — use backup server today</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Updated</span>
+            <span class="info-value" id="updated-at">—</span>
+          </div>
+        </div>
+
+        <div class="backup-box">
+          <h2>Use the backup server for today</h2>
+          <p>
+            All calculations and data entry are available on our standby backup instance.
+            Please switch to the backup server until maintenance is complete.
+          </p>
+          <a class="btn-backup" id="backup-link" href="#" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59L10 12.59 11.41 14 19 6.41V10h2V3h-7z"/>
+            </svg>
+            Open Backup Server
+          </a>
+        </div>
+
+        <p class="footer-note">
+          Incident ID: <code>AWS-MAINT-HISABPRO-2026</code> ·
+          Questions? Contact your system administrator.
+        </p>
+      </div>
+    </article>
+  </main>
+
+  <script>
+    // ← Change this URL to your live backup server
+    const BACKUP_SERVER_URL = 'https://backup.hisabpro.dise.org.in';
+
+    document.getElementById('backup-link').href = BACKUP_SERVER_URL;
+
+    document.getElementById('updated-at').textContent =
+      new Date().toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'Asia/Kolkata',
+      }) + ' IST';
+  </script>
+</body>
+</html>

@@ -134,9 +134,10 @@ class SmartTextParser {
         result: null,
         errors: [
           const SmartParseLineError(
-            lineNumber: 1,
+            lineNumber: 0,
             lineText: '',
-            message: 'No entries found. Paste lines like: Sb. 6781 45',
+            message:
+                'Please paste your calculation message above.\nExample: Sb. 6781 45',
           ),
         ],
       );

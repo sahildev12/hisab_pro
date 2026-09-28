@@ -5,8 +5,10 @@ import '../core/storage.dart';
 import '../models/history_entry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/hisab_page_header.dart';
+import 'calculation_defaults_screen.dart';
 import 'entry_names_screen.dart';
 import 'history_screen.dart';
+import '../widgets/total_commission_modal.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -78,6 +80,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => EntryNamesScreen(
+                    initialSettings: _settings,
+                  ),
+                ),
+              );
+              if (updated != null) {
+                await _applySettings(updated);
+              }
+            },
+          ),
+          _SettingsTile(
+            icon: Icons.payments_outlined,
+            title: 'Total Commission',
+            subtitle: 'View saved commission balances',
+            onTap: () => showTotalCommissionModal(
+              context: context,
+              storage: widget.storage,
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.tune_outlined,
+            title: 'Calculation Defaults',
+            subtitle: 'Passing, deduction & commission defaults',
+            onTap: () async {
+              final updated = await Navigator.push<AppSettings>(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CalculationDefaultsScreen(
                     initialSettings: _settings,
                   ),
                 ),

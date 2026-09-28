@@ -15,6 +15,7 @@ import 'create_group_screen.dart';
 import 'group_session_screen.dart';
 import 'settings_screen.dart';
 import 'smart_calculator_screen.dart';
+import '../widgets/total_commission_modal.dart';
 
 class GroupListSummary {
   const GroupListSummary({
@@ -189,6 +190,13 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
     ).then((_) => _reload());
   }
 
+  Future<void> _openTotalCommission() async {
+    await showTotalCommissionModal(
+      context: context,
+      storage: widget.storage,
+    );
+  }
+
   void _openSettings() {
     Navigator.push(
       context,
@@ -237,10 +245,30 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
                       children: [
                         const HisabLogo(height: 32),
                         const Spacer(),
-                        TextButton.icon(
+                        OutlinedButton.icon(
                           onPressed: _openGlobalSmartCalculator,
-                          icon: const Icon(Icons.content_paste_go_outlined, size: 18),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.primaryBlue,
+                            backgroundColor: AppColors.surface,
+                            side: const BorderSide(color: AppColors.border),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.content_paste_go_outlined,
+                            size: 18,
+                          ),
                           label: const Text('Smart'),
+                        ),
+                        IconButton(
+                          onPressed: _openTotalCommission,
+                          icon: const Icon(Icons.payments_outlined),
+                          tooltip: 'Total Commission',
                         ),
                         IconButton(
                           onPressed: _openSettings,
@@ -314,8 +342,15 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openCreateGroup,
         backgroundColor: AppColors.primaryBlue,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Group'),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: Text(
+          'Add Group',
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
       ),
     );
   }

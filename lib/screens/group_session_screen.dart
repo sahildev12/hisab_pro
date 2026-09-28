@@ -11,12 +11,15 @@ import '../core/group_rows.dart';
 import '../core/share_message.dart';
 import '../core/smart_text_parser.dart';
 import '../core/storage.dart';
+import '../core/money.dart' show suggestedAmountDeduction;
 import '../core/validate.dart';
 import '../models/calculation_group.dart';
 import '../models/calculation_result.dart';
 import '../models/history_entry.dart';
 import '../models/row_data.dart';
 import '../theme/app_theme.dart';
+import '../widgets/calculation_rates_control.dart';
+import '../widgets/commission_balance_card.dart';
 import '../widgets/group_static_row_table.dart';
 import '../widgets/hisab_pro_modal.dart';
 import '../widgets/paste_result_summary.dart';
@@ -65,6 +68,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   Decimal _passingRate = defaultPassingRate;
   Decimal _amountDeductionRate = defaultAmountDeductionRate;
   bool _commissionTracking = false;
+  bool _deductionLinkedToPassing = true;
   Decimal _storedCommissionBalance = Decimal.zero;
   String? _historyEntryId;
   String? _originalPastedText;
@@ -99,6 +103,8 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     _title = _group.name;
     _passingRate = _group.passingRate;
     _amountDeductionRate = _group.amountDeductionRate;
+    _deductionLinkedToPassing =
+        _amountDeductionRate == suggestedAmountDeduction(_passingRate);
   }
 
   Future<void> _load() async {
@@ -365,13 +371,71 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     await shareOnlyCalculationMessage(message);
   }
 
+  void _onRatesChanged(CalculationRates rates) {
+    setState(() {
+      _passingRate = rates.passingRate;
+      _amountDeductionRate = rates.amountDeductionRate;
+      _errorMessage = null;
+      _group = _group.copyWith(
+        passingRate: rates.passingRate,
+        amountDeductionRate: rates.amountDeductionRate,
+      );
+    });
+    _updateLiveResult();
+    _saveDraft();
+  }
+
+  void _onCommissionTrackingChanged(bool value) {
+    setState(() => _commissionTracking = value);
+    _updateLiveResult();
+    _saveDraft();
+  }
+
+  void _updateLiveResult() {
+    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
+    if (!validation.isValid) {
+      if (_result != null) setState(() => _result = null);
+      return;
+    }
+    try {
+      final result = calculateSettlement(
+        _rows,
+        passingRate: _passingRate,
+        amountDeductionRate: _amountDeductionRate,
+        commissionTracking: _commissionTracking,
+        storedCommissionBalance: _storedCommissionBalance,
+      );
+      if (mounted) setState(() => _result = result);
+    } catch (_) {
+      if (_result != null) setState(() => _result = null);
+    }
+  }
+
+  Future<void> _clearCommission() async {
+    final confirmed = await showHisabProConfirmDialog(
+      context: context,
+      title: 'Clear commission balance?',
+      message: 'This resets the saved commission balance for this group.',
+      confirmLabel: 'Clear',
+      destructive: true,
+    );
+    if (confirmed != true || !mounted) return;
+
+    final ownerId = groupTitleCommissionOwnerId(_group.id, _title);
+    await widget.storage.setCommissionBalance(ownerId, Decimal.zero);
+    setState(() => _storedCommissionBalance = Decimal.zero);
+    _updateLiveResult();
+  }
+
   void _onRowChanged(int index, RowData row) {
     setState(() => _rows[index] = row);
+    _updateLiveResult();
     _saveDraft();
   }
 
   void _deleteRow(int index) {
     setState(() => _rows.removeAt(index));
+    _updateLiveResult();
     _saveDraft();
   }
 
@@ -448,16 +512,6 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
           name: name,
         ),
       );
-    });
-    _saveDraft();
-  }
-
-  void _onReorder(int oldIndex, int newIndex) {
-    setState(() {
-      var target = newIndex;
-      if (target > oldIndex) target -= 1;
-      final row = _rows.removeAt(oldIndex);
-      _rows.insert(target, row);
     });
     _saveDraft();
   }
@@ -658,13 +712,26 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                 },
               ),
               const SizedBox(height: AppSpacing.sectionGap),
+              CalculationRatesControl(
+                rates: CalculationRates(
+                  passingRate: _passingRate,
+                  amountDeductionRate: _amountDeductionRate,
+                ),
+                deductionLinkedToPassing: _deductionLinkedToPassing,
+                onDeductionLinkChanged: (linked) {
+                  setState(() => _deductionLinkedToPassing = linked);
+                },
+                onRatesChanged: _onRatesChanged,
+                commissionTracking: _commissionTracking,
+                onCommissionTrackingChanged: _onCommissionTrackingChanged,
+              ),
+              const SizedBox(height: AppSpacing.sectionGap),
               GroupStaticRowTable(
                 rows: _rows,
                 onRowChanged: _onRowChanged,
                 onDeleteRow: _deleteRow,
                 onAddRow: _addRow,
                 onAddCustomEntry: _addCustomEntry,
-                onReorder: _onReorder,
                 onReset: _resetSession,
                 errorRowIndex: _errorRowIndex,
                 canAddRow: canAddRow,
@@ -682,13 +749,25 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
               if (_result != null) ...[
                 const SizedBox(height: 16),
                 PasteResultSummary(result: _result!),
+                if (_result!.showsCommissionInfo) ...[
+                  const SizedBox(height: 12),
+                  CommissionBalanceCard(
+                    result: _result!,
+                    onClear:
+                        _result!.commissionTracking ? _clearCommission : null,
+                  ),
+                ],
               ],
               const SizedBox(height: 20),
               FilledButton(
                 onPressed: _isCalculating ? null : _calculate,
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primaryBlue,
+                  foregroundColor: Colors.white,
                   minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: _isCalculating
                     ? const SizedBox(
@@ -699,7 +778,13 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('Calculate'),
+                    : Text(
+                        'Calculate',
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
               ),
               if (_copyMessage != null) ...[
                 const SizedBox(height: 8),
@@ -709,8 +794,14 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                       child: OutlinedButton.icon(
                         onPressed: _copyResult,
                         style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.primaryBlue,
+                          backgroundColor: AppColors.surface,
+                          side: const BorderSide(color: AppColors.border),
                           minimumSize:
                               const Size.fromHeight(AppSpacing.buttonHeight),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         icon: const Icon(Icons.copy_outlined, size: 18),
                         label: const Text('Copy'),
@@ -721,8 +812,14 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                       child: OutlinedButton.icon(
                         onPressed: _shareResult,
                         style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.primaryBlue,
+                          backgroundColor: AppColors.surface,
+                          side: const BorderSide(color: AppColors.border),
                           minimumSize:
                               const Size.fromHeight(AppSpacing.buttonHeight),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         icon: const Icon(Icons.share_outlined, size: 18),
                         label: const Text('Share'),

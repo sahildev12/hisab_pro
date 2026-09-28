@@ -1,13 +1,15 @@
 import 'package:decimal/decimal.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../core/calculate.dart';
+import '../core/calculate.dart' show calculateSettlement, defaultAmountDeductionRate, defaultPassingRate;
+import '../core/clipboard_reader.dart';
 import '../core/commission.dart';
 import '../core/copy_message.dart';
 import '../core/format.dart';
-import '../core/money.dart';
+import '../core/money.dart' show percentOf, roundMoney, suggestedAmountDeduction;
 import '../core/parse_number.dart';
 import '../core/smart_text_parser.dart';
 import '../core/storage.dart';
@@ -17,6 +19,8 @@ import '../models/calculation_result.dart';
 import '../models/paste_recent_entry.dart';
 import '../models/row_data.dart';
 import '../theme/app_theme.dart';
+import '../widgets/calculation_rates_control.dart';
+import '../widgets/commission_balance_card.dart';
 import '../widgets/hisab_pro_modal.dart';
 import '../widgets/paste_result_summary.dart';
 
@@ -49,10 +53,18 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
   List<SmartParseLineError> _errors = [];
   String _persistentHeader = '';
   bool _isCalculating = false;
-
+  bool _commissionTracking = false;
+  bool _deductionLinkedToPassing = true;
+  Decimal _passingRate = defaultPassingRate;
+  Decimal _amountDeductionRate = defaultAmountDeductionRate;
   @override
   void initState() {
     super.initState();
+    _commissionTracking = widget.settings.defaultCommissionTracking;
+    _passingRate = widget.settings.defaultPassingRate;
+    _amountDeductionRate = widget.settings.defaultAmountDeductionRate;
+    _deductionLinkedToPassing =
+        _amountDeductionRate == suggestedAmountDeduction(_passingRate);
     _textController.addListener(_persistDraft);
     _loadInitialState();
   }
@@ -79,10 +91,53 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
   }
 
   Future<void> _pasteFromClipboard() async {
-    final data = await Clipboard.getData('text/plain');
-    if (data?.text != null) {
-      _textController.text = data!.text!;
+    String? text;
+    try {
+      text = await readClipboardText();
+    } catch (_) {
+      text = null;
     }
+
+    if (text != null && text.trim().isNotEmpty) {
+      setState(() {
+        _textController.text = text!.trim();
+        _errors = [];
+      });
+      await widget.storage.savePasteCalculationDraft(_textController.text);
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          kIsWeb
+              ? 'Allow clipboard access, or tap the box and paste manually.'
+              : 'Nothing to paste. Copy a calculation message first.',
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  String _formatError(SmartParseLineError error) {
+    if (error.lineNumber <= 0 || error.lineText.trim().isEmpty) {
+      return error.message;
+    }
+    return 'Line ${error.lineNumber}: ${error.message}\n"${error.lineText.trim()}"';
+  }
+
+  InputBorder _pasteFieldBorder({required bool focused, required bool hasError}) {
+    final color = hasError
+        ? AppColors.danger
+        : AppColors.danger.withValues(alpha: 0.65);
+    final width = hasError ? 2.0 : 1.5;
+
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+      borderSide: BorderSide(color: color, width: width),
+    );
   }
 
   Future<void> _reset() async {
@@ -103,11 +158,46 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
       passingRate: widget.settings.defaultPassingRate,
       amountDeductionRate: widget.settings.defaultAmountDeductionRate,
     );
-    return SmartTextParser.resolveRates(
+    final resolved = SmartTextParser.resolveRates(
       parsed: parsed,
       groupPassingRate: defaults.passingRate,
       groupDeductionRate: defaults.amountDeductionRate,
     );
+    _passingRate = resolved.passingRate;
+    _amountDeductionRate = resolved.amountDeductionRate;
+    _deductionLinkedToPassing =
+        _amountDeductionRate == suggestedAmountDeduction(_passingRate);
+    return resolved;
+  }
+
+  void _onRatesChanged(CalculationRates rates) {
+    setState(() {
+      _passingRate = rates.passingRate;
+      _amountDeductionRate = rates.amountDeductionRate;
+      _errors = [];
+    });
+    if (_parsed != null) _parseAndCalculate(silent: true);
+  }
+
+  void _onCommissionTrackingChanged(bool value) {
+    setState(() => _commissionTracking = value);
+    if (_parsed != null) _parseAndCalculate(silent: true);
+  }
+
+  Future<void> _clearCommission() async {
+    if (_parsed == null) return;
+    final confirmed = await showHisabProConfirmDialog(
+      context: context,
+      title: 'Clear commission balance?',
+      message: 'This resets the saved commission balance for this title.',
+      confirmLabel: 'Clear',
+      destructive: true,
+    );
+    if (confirmed != true || !mounted) return;
+
+    final ownerId = commissionOwnerId(_parsed!.title);
+    await widget.storage.setCommissionBalance(ownerId, Decimal.zero);
+    if (_parsed != null) await _parseAndCalculate(silent: true);
   }
 
   Future<void> _parseAndCalculate({bool silent = false}) async {
@@ -136,7 +226,7 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     }
 
     final parsed = output.result!;
-    final rates = _resolveRates(parsed);
+    _resolveRates(parsed);
     final validation = validateRows(parsed.rows, allowedNames: widget.entryNames);
 
     if (!validation.isValid) {
@@ -155,18 +245,20 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
       return;
     }
 
-    final commissionTracking = widget.settings.defaultCommissionTracking;
-    final storedBalance = await widget.storage.getCommissionBalance(
-      commissionOwnerId(parsed.title),
-    );
+    final ownerId = commissionOwnerId(parsed.title);
+    final storedBalance = await widget.storage.getCommissionBalance(ownerId);
 
-    final result = calculateSettlement(
+    var result = calculateSettlement(
       parsed.rows,
-      passingRate: rates.passingRate,
-      amountDeductionRate: rates.amountDeductionRate,
-      commissionTracking: commissionTracking,
+      passingRate: _passingRate,
+      amountDeductionRate: _amountDeductionRate,
+      commissionTracking: _commissionTracking,
       storedCommissionBalance: storedBalance,
     );
+
+    if (_commissionTracking && !silent) {
+      await widget.storage.setCommissionBalance(ownerId, result.commissionBalance);
+    }
 
     if (!mounted) return;
 
@@ -486,14 +578,50 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
             TextField(
               controller: _textController,
               maxLines: 14,
+              onChanged: (_) {
+                if (_errors.isNotEmpty) {
+                  setState(() => _errors = []);
+                }
+              },
               decoration: InputDecoration(
+                hintText: 'Required — paste lines like: Sb. 2580 255',
+                hintStyle: GoogleFonts.inter(
+                  color: AppColors.secondaryText,
+                  fontSize: 14,
+                ),
                 filled: true,
                 fillColor: AppColors.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
-                  borderSide: const BorderSide(color: AppColors.border),
+                enabledBorder: _pasteFieldBorder(
+                  focused: false,
+                  hasError: _errors.isNotEmpty,
+                ),
+                focusedBorder: _pasteFieldBorder(
+                  focused: true,
+                  hasError: _errors.isNotEmpty,
+                ),
+                errorBorder: _pasteFieldBorder(
+                  focused: false,
+                  hasError: true,
+                ),
+                focusedErrorBorder: _pasteFieldBorder(
+                  focused: true,
+                  hasError: true,
                 ),
               ),
+            ),
+            const SizedBox(height: AppSpacing.sectionGap),
+            CalculationRatesControl(
+              rates: CalculationRates(
+                passingRate: _passingRate,
+                amountDeductionRate: _amountDeductionRate,
+              ),
+              deductionLinkedToPassing: _deductionLinkedToPassing,
+              onDeductionLinkChanged: (linked) {
+                setState(() => _deductionLinkedToPassing = linked);
+              },
+              onRatesChanged: _onRatesChanged,
+              commissionTracking: _commissionTracking,
+              onCommissionTrackingChanged: _onCommissionTrackingChanged,
             ),
             if (_errors.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -510,7 +638,7 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Calculation couldn\'t be completed.',
+                      'Please check your pasted message',
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.w600,
                         color: AppColors.danger,
@@ -521,10 +649,12 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                       (e) => Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Text(
-                          e.lineNumber > 0
-                              ? 'Line ${e.lineNumber}: ${e.message}\n"${e.lineText.trim()}"'
-                              : e.message,
-                          style: GoogleFonts.inter(fontSize: 13),
+                          _formatError(e),
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: AppColors.primaryText,
+                            height: 1.45,
+                          ),
                         ),
                       ),
                     ),
@@ -547,13 +677,21 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
                         onPressed: _copyResult,
                         icon: const Icon(
                           Icons.copy_outlined,
-                          color: Colors.white70,
+                          color: AppColors.secondaryText,
                           size: 20,
                         ),
                       ),
                     ),
                 ],
               ),
+              if (_result!.showsCommissionInfo) ...[
+                const SizedBox(height: 12),
+                CommissionBalanceCard(
+                  result: _result!,
+                  onClear:
+                      _result!.commissionTracking ? _clearCommission : null,
+                ),
+              ],
             ],
             const SizedBox(height: 20),
             FilledButton(

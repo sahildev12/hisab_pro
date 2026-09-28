@@ -1,0 +1,14 @@
+HISABPRO — WHICH APK TO USE
+============================
+
+HisabPro-WebView.apk
+  → WebView app ONLY. Opens https://hisabpro.dise.org.in/ in a browser inside the app.
+  → Use this if you want the website as an Android app.
+  → Separate project: C:\xampp\htdocs\hisabpro_webview
+  → Does NOT change brother's native app (hisab_pro / shinchan branch).
+
+HisabPro-release.apk
+  → Full native Flutter app (brother's app with groups, offline, etc.)
+  → NOT a WebView — runs code installed on the phone.
+
+Install only ONE depending on what you need.

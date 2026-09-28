@@ -7,11 +7,15 @@ import '../core/money.dart';
 import '../models/calculation_result.dart';
 import '../theme/app_theme.dart';
 
+/// Light result card — white background, dark text (never use dark box).
 class PasteResultSummary extends StatelessWidget {
   const PasteResultSummary({super.key, required this.result});
 
   final CalculationResult result;
 
+  static const _bg = Color(0xFFFFFFFF);
+  static const _text = Color(0xFF1C2B33);
+  static const _border = Color(0xFFE4E6EB);
   static const _labelWidth = 11;
 
   String _label(String text) => text.padRight(_labelWidth);
@@ -21,15 +25,18 @@ class PasteResultSummary extends StatelessWidget {
   TextStyle _baseStyle() => GoogleFonts.inter(
         fontSize: 15,
         fontWeight: FontWeight.w600,
-        color: Colors.white,
+        color: _text,
         height: 1.65,
       );
 
   TextSpan _span(String text, {bool underline = false}) {
     return TextSpan(
       text: text,
-      style:
-          underline ? const TextStyle(decoration: TextDecoration.underline) : null,
+      style: TextStyle(
+        color: _text,
+        decoration: underline ? TextDecoration.underline : null,
+        decorationColor: _text,
+      ),
     );
   }
 
@@ -75,8 +82,16 @@ class PasteResultSummary extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       decoration: BoxDecoration(
-        color: const Color(0xFF2F3136),
+        color: _bg,
         borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        border: Border.all(color: _border, width: 1.5),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: DefaultTextStyle(
         style: _baseStyle(),

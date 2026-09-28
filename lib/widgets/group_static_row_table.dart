@@ -15,7 +15,6 @@ class GroupStaticRowTable extends StatelessWidget {
     required this.onDeleteRow,
     required this.onAddRow,
     required this.onAddCustomEntry,
-    required this.onReorder,
     this.onReset,
     this.errorRowIndex,
     this.canAddRow = true,
@@ -26,7 +25,6 @@ class GroupStaticRowTable extends StatelessWidget {
   final ValueChanged<int> onDeleteRow;
   final VoidCallback onAddRow;
   final VoidCallback onAddCustomEntry;
-  final void Function(int oldIndex, int newIndex) onReorder;
   final VoidCallback? onReset;
   final int? errorRowIndex;
   final bool canAddRow;
@@ -56,16 +54,21 @@ class GroupStaticRowTable extends StatelessWidget {
                 ),
                 const Spacer(),
                 if (onReset != null) ...[
-                  TextButton(
+                  OutlinedButton(
                     onPressed: onReset,
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.secondaryText,
+                      backgroundColor: AppColors.surface,
+                      side: const BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      minimumSize: const Size(0, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     child: Text(
                       'Reset',
@@ -91,19 +94,15 @@ class GroupStaticRowTable extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: _TableHeader(),
           ),
-          ReorderableListView.builder(
+          ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            buildDefaultDragHandles: false,
             itemCount: rows.length,
-            onReorder: onReorder,
             itemBuilder: (context, index) {
               final row = rows[index];
               return Padding(
-                key: ValueKey(row.id),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: _StaticRowEntry(
-                  index: index,
                   row: row,
                   hasError: errorRowIndex == index,
                   onChanged: (updated) => onRowChanged(index, updated),
@@ -112,76 +111,66 @@ class GroupStaticRowTable extends StatelessWidget {
               );
             },
           ),
-          Row(
-            children: [
-              Expanded(
-                child: Material(
-                  color: AppColors.lightBlue,
-                  child: InkWell(
-                    onTap: canAddRow ? onAddRow : null,
-                    child: SizedBox(
-                      height: 42,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.add,
-                            size: 16,
-                            color: canAddRow
-                                ? AppColors.primaryBlue
-                                : AppColors.stone,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Add Row',
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: canAddRow
-                                  ? AppColors.primaryBlue
-                                  : AppColors.stone,
-                            ),
-                          ),
-                        ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: canAddRow ? onAddRow : null,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primaryBlue,
+                      backgroundColor: AppColors.lightBlue,
+                      side: BorderSide(
+                        color: canAddRow
+                            ? AppColors.primaryBlue.withValues(alpha: 0.25)
+                            : AppColors.border,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    icon: Icon(
+                      Icons.add_rounded,
+                      size: 16,
+                      color: canAddRow ? AppColors.primaryBlue : AppColors.stone,
+                    ),
+                    label: Text(
+                      'Add Row',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
-              ),
-              Expanded(
-                child: Material(
-                  color: AppColors.surfaceSoft,
-                  child: InkWell(
-                    onTap: onAddCustomEntry,
-                    child: SizedBox(
-                      height: 42,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.edit_outlined,
-                            size: 16,
-                            color: AppColors.primaryBlue,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              'Custom Name',
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.primaryBlue,
-                              ),
-                            ),
-                          ),
-                        ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onAddCustomEntry,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primaryBlue,
+                      backgroundColor: AppColors.surface,
+                      side: const BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: Text(
+                      'Custom Name',
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -199,7 +188,6 @@ class _TableHeader extends StatelessWidget {
       ),
       child: const Row(
         children: [
-          SizedBox(width: 28),
           Expanded(
             flex: 3,
             child: _HeaderLabel('Name'),
@@ -214,7 +202,7 @@ class _TableHeader extends StatelessWidget {
             flex: 3,
             child: _HeaderLabel('Bracket'),
           ),
-          SizedBox(width: 44),
+          SizedBox(width: 40),
         ],
       ),
     );
@@ -241,14 +229,12 @@ class _HeaderLabel extends StatelessWidget {
 
 class _StaticRowEntry extends StatefulWidget {
   const _StaticRowEntry({
-    required this.index,
     required this.row,
     required this.hasError,
     required this.onChanged,
     required this.onDelete,
   });
 
-  final int index;
   final RowData row;
   final bool hasError;
   final ValueChanged<RowData> onChanged;
@@ -330,17 +316,6 @@ class _StaticRowEntryState extends State<_StaticRowEntry> {
       color: AppColors.surface,
       child: Row(
         children: [
-          ReorderableDragStartListener(
-            index: widget.index,
-            child: const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: Icon(
-                Icons.drag_handle,
-                color: AppColors.slate,
-                size: 22,
-              ),
-            ),
-          ),
           Expanded(
             flex: 3,
             child: Container(
@@ -389,6 +364,7 @@ class _StaticRowEntryState extends State<_StaticRowEntry> {
           IconButton(
             onPressed: widget.onDelete,
             icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+            visualDensity: VisualDensity.compact,
           ),
         ],
       ),

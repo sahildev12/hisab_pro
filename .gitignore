@@ -46,3 +46,12 @@ app.*.map.json
 
 # Release APKs (share separately, not in git)
 *.apk
+
+# Web deploy outputs (regenerate with scripts/)
+UPLOAD-TO-WEBSITE/
+UPLOAD-MAINTENANCE/
+upload this on the server*/
+web_dist/
+hisabpro-maintenance-deploy/
+hisabpro-*-deploy.zip
+ZZZZ*/

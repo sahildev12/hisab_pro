@@ -11,8 +11,10 @@ import '../models/history_entry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/hisab_logo.dart';
+import '../widgets/hisab_pro_modal.dart';
 import 'create_group_screen.dart';
 import 'group_session_screen.dart';
+import 'history_screen.dart';
 import 'settings_screen.dart';
 import 'smart_calculator_screen.dart';
 import '../widgets/total_commission_modal.dart';
@@ -197,6 +199,33 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
     );
   }
 
+  void _openGroupHistory(CalculationGroup group) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HistoryScreen(
+          storage: widget.storage,
+          groupIdFilter: group.id,
+          onEditEntry: (_) {},
+        ),
+      ),
+    ).then((_) => _reload());
+  }
+
+  Future<void> _deleteGroup(CalculationGroup group) async {
+    final confirmed = await showHisabProConfirmDialog(
+      context: context,
+      title: 'Delete Group?',
+      message:
+          'This will remove "${group.name}" and all calculations saved in this group.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (confirmed != true) return;
+    await widget.storage.deleteGroup(group.id);
+    await _reload();
+  }
+
   void _openSettings() {
     Navigator.push(
       context,
@@ -332,6 +361,8 @@ class _GroupsHomeScreenState extends State<GroupsHomeScreen> {
                                 summary: summary,
                                 timeLabel: _formatTime(summary?.updatedAt),
                                 onTap: () => _openGroup(group),
+                                onOpenHistory: () => _openGroupHistory(group),
+                                onDelete: () => _deleteGroup(group),
                               );
                             },
                           ),
@@ -362,12 +393,16 @@ class _GroupRow extends StatelessWidget {
     required this.summary,
     required this.timeLabel,
     required this.onTap,
+    required this.onOpenHistory,
+    required this.onDelete,
   });
 
   final CalculationGroup group;
   final GroupListSummary? summary;
   final String timeLabel;
   final VoidCallback onTap;
+  final VoidCallback onOpenHistory;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -442,6 +477,30 @@ class _GroupRow extends StatelessWidget {
                     ],
                   ],
                 ),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: AppColors.slate),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'history':
+                      onOpenHistory();
+                    case 'delete':
+                      onDelete();
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'history',
+                    child: Text('View History'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Delete Group',
+                      style: TextStyle(color: AppColors.danger),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

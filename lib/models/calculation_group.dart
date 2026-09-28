@@ -13,6 +13,7 @@ class CalculationGroup {
     required this.createdAt,
     required this.updatedAt,
     this.avatarColorValue,
+    this.historyEntryIds = const [],
   });
 
   final String id;
@@ -22,6 +23,7 @@ class CalculationGroup {
   final DateTime createdAt;
   final DateTime updatedAt;
   final int? avatarColorValue;
+  final List<String> historyEntryIds;
 
   CalculationGroup copyWith({
     String? id,
@@ -31,6 +33,7 @@ class CalculationGroup {
     DateTime? createdAt,
     DateTime? updatedAt,
     int? avatarColorValue,
+    List<String>? historyEntryIds,
   }) {
     return CalculationGroup(
       id: id ?? this.id,
@@ -41,6 +44,7 @@ class CalculationGroup {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       avatarColorValue: avatarColorValue ?? this.avatarColorValue,
+      historyEntryIds: historyEntryIds ?? this.historyEntryIds,
     );
   }
 
@@ -52,10 +56,12 @@ class CalculationGroup {
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
         if (avatarColorValue != null) 'avatarColorValue': avatarColorValue,
+        if (historyEntryIds.isNotEmpty) 'historyEntryIds': historyEntryIds,
       };
 
   factory CalculationGroup.fromJson(Map<String, dynamic> json) {
     final passing = Decimal.parse(json['passingRate'].toString());
+    final rawHistory = json['historyEntryIds'] as List<dynamic>? ?? [];
     return CalculationGroup(
       id: json['id'] as String,
       name: json['name'] as String? ?? '',
@@ -66,6 +72,7 @@ class CalculationGroup {
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
       avatarColorValue: json['avatarColorValue'] as int?,
+      historyEntryIds: rawHistory.map((id) => id.toString()).toList(),
     );
   }
 

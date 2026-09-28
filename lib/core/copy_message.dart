@@ -155,8 +155,18 @@ String buildPasteCopyMessage({
   return buffer.toString().trimRight();
 }
 
+bool _rowHasCopyableNumbers(RowData row) {
+  if (isRowEmpty(row)) return false;
+  return tryParseDecimal(row.amount) != null &&
+      tryParseDecimal(row.bracket) != null;
+}
+
+List<RowData> _copyableRows(List<RowData> rows) {
+  return rows.where(_rowHasCopyableNumbers).toList();
+}
+
 void _writePasteFormattedRows(StringBuffer buffer, List<RowData> rows) {
-  final activeRows = rows.where((item) => !isRowEmpty(item)).toList();
+  final activeRows = _copyableRows(rows);
   if (activeRows.isEmpty) return;
 
   final bracketWidth = activeRows
@@ -180,7 +190,7 @@ void _writeFormattedRows(
   List<RowData> rows, {
   bool spacedBrackets = false,
 }) {
-  final activeRows = rows.where((item) => !isRowEmpty(item)).toList();
+  final activeRows = _copyableRows(rows);
   if (activeRows.isEmpty) return;
 
   final nameWidth = activeRows

@@ -182,40 +182,63 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   }
 
   Future<void> _saveDraft({String lastView = 'main'}) async {
-    final now = DateTime.now();
-    final hasData = _rows.any(
-      (row) =>
-          row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
-    );
+    try {
+      final now = DateTime.now();
+      final hasData = _rows.any(
+        (row) =>
+            row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
+      );
 
-    if (hasData) {
-      _historyEntryId ??= now.microsecondsSinceEpoch.toString();
+      if (hasData) {
+        _historyEntryId ??= now.microsecondsSinceEpoch.toString();
+      }
+
+      await widget.storage.saveGroupDraft(
+        _group.id,
+        DraftState(
+          title: _title,
+          rows: _rows,
+          passingRate: _passingRate,
+          amountDeductionRate: _amountDeductionRate,
+          commissionTracking: _commissionTracking,
+          lastView: lastView,
+          historyEntryId: _historyEntryId,
+          updatedAt: now,
+          groupId: _group.id,
+          originalPastedText: _originalPastedText,
+        ),
+      );
+
+      if (hasData && _historyEntryId != null) {
+        await _syncHistoryEntry(lastView: lastView, updatedAt: now);
+      }
+
+      await widget.storage.upsertGroup(
+        _group.copyWith(updatedAt: now),
+      );
+      widget.onGroupUpdated?.call();
+    } catch (_) {
+      // Avoid crashing the UI if persistence fails while editing.
     }
+  }
 
-    await widget.storage.saveGroupDraft(
-      _group.id,
-      DraftState(
-        title: _title,
-        rows: _rows,
+  void _updateDerivedResult() {
+    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
+    if (!validation.isValid) {
+      _result = null;
+      return;
+    }
+    try {
+      _result = calculateSettlement(
+        _rows,
         passingRate: _passingRate,
         amountDeductionRate: _amountDeductionRate,
         commissionTracking: _commissionTracking,
-        lastView: lastView,
-        historyEntryId: _historyEntryId,
-        updatedAt: now,
-        groupId: _group.id,
-        originalPastedText: _originalPastedText,
-      ),
-    );
-
-    if (hasData && _historyEntryId != null) {
-      await _syncHistoryEntry(lastView: lastView, updatedAt: now);
+        storedCommissionBalance: _storedCommissionBalance,
+      );
+    } catch (_) {
+      _result = null;
     }
-
-    await widget.storage.upsertGroup(
-      _group.copyWith(updatedAt: now),
-    );
-    widget.onGroupUpdated?.call();
   }
 
   Future<void> _syncHistoryEntry({
@@ -341,18 +364,24 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     }
   }
 
-  String? get _copyMessage {
+  String? _buildCopyMessageSafe() {
     if (_result == null) return null;
-    return buildPasteCopyMessage(
-      title: _title,
-      rows: _rows,
-      result: _result!,
-      persistentHeader: _persistentHeaderController.text,
-    );
+    final validation = validateRows(_rows, allowedNames: _allowedEntryNames);
+    if (!validation.isValid) return null;
+    try {
+      return buildPasteCopyMessage(
+        title: _title,
+        rows: _rows,
+        result: _result!,
+        persistentHeader: _persistentHeaderController.text,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _copyResult() async {
-    final message = _copyMessage;
+    final message = _buildCopyMessageSafe();
     if (message == null) return;
     await copyCalculationMessage(message);
     if (!mounted) return;
@@ -366,7 +395,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   }
 
   Future<void> _shareResult() async {
-    final message = _copyMessage;
+    final message = _buildCopyMessageSafe();
     if (message == null) return;
     await shareOnlyCalculationMessage(message);
   }
@@ -428,15 +457,62 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   }
 
   void _onRowChanged(int index, RowData row) {
-    setState(() => _rows[index] = row);
+    setState(() {
+      _rows[index] = row;
+      _errorMessage = null;
+      _errorRowIndex = null;
+    });
     _updateLiveResult();
     _saveDraft();
   }
 
   void _deleteRow(int index) {
-    setState(() => _rows.removeAt(index));
+    setState(() {
+      _rows.removeAt(index);
+      if (_rows.isEmpty) {
+        _rows = defaultGroupRows(_group.id);
+      }
+      _errorMessage = null;
+      _errorRowIndex = null;
+    });
     _updateLiveResult();
     _saveDraft();
+  }
+
+  Future<void> _resetDigits() async {
+    final hasDigits = _rows.any(
+      (row) =>
+          row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
+    );
+    if (!hasDigits) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No amounts or brackets to clear.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(milliseconds: 1800),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _rows = _rows
+          .map((row) => row.copyWith(amount: '', bracket: ''))
+          .toList();
+      _result = null;
+      _errorMessage = null;
+      _errorRowIndex = null;
+    });
+    await _saveDraft();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Amounts and brackets cleared.'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(milliseconds: 1800),
+      ),
+    );
   }
 
   void _addRow() {
@@ -516,8 +592,19 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     _saveDraft();
   }
 
+  Future<void> _finalizeSessionHistory() async {
+    if (_result != null) {
+      await _syncHistoryEntry(lastView: 'results');
+    } else if (_rows.any(
+      (row) =>
+          row.amount.trim().isNotEmpty || row.bracket.trim().isNotEmpty,
+    )) {
+      await _saveDraft();
+    }
+  }
+
   Future<void> _startFreshCalculation() async {
-    await _saveDraft();
+    await _finalizeSessionHistory();
     await widget.storage.clearGroupDraft(_group.id);
     setState(() {
       _syncGroupMeta();
@@ -557,9 +644,10 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
   Future<void> _resetSession() async {
     final confirmed = await showHisabProConfirmDialog(
       context: context,
-      title: 'Reset entries?',
-      message: 'This will clear all amounts and brackets in this session.',
-      confirmLabel: 'Reset',
+      title: 'Reset all entries?',
+      message:
+          'This clears the current session and starts fresh. Saved history is kept.',
+      confirmLabel: 'Reset All',
       destructive: true,
     );
     if (confirmed != true) return;
@@ -642,6 +730,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
     }
 
     final canAddRow = nextMissingFixedName(_rows) != null;
+    final copyMessage = _buildCopyMessageSafe();
 
     return PopScope(
       onPopInvokedWithResult: (didPop, result) {
@@ -733,6 +822,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                 onAddRow: _addRow,
                 onAddCustomEntry: _addCustomEntry,
                 onReset: _resetSession,
+                onResetDigits: _resetDigits,
                 errorRowIndex: _errorRowIndex,
                 canAddRow: canAddRow,
               ),
@@ -758,7 +848,33 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                   ),
                 ],
               ],
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _openGroupHistory,
+                      icon: const Icon(Icons.history_rounded, size: 18),
+                      label: const Text('History'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _startFreshCalculation,
+                      icon: const Icon(Icons.note_add_outlined, size: 18),
+                      label: const Text('New'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               FilledButton(
                 onPressed: _isCalculating ? null : _calculate,
                 style: FilledButton.styleFrom(
@@ -786,7 +902,7 @@ class _GroupSessionScreenState extends State<GroupSessionScreen> {
                         ),
                       ),
               ),
-              if (_copyMessage != null) ...[
+              if (copyMessage != null) ...[
                 const SizedBox(height: 8),
                 Row(
                   children: [

@@ -82,11 +82,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _load() async {
-    var history = await widget.storage.loadHistory();
-    if (widget.groupIdFilter != null) {
-      history =
-          history.where((e) => e.groupId == widget.groupIdFilter).toList();
-    }
+    var history = widget.groupIdFilter != null
+        ? await widget.storage.loadGroupHistory(widget.groupIdFilter!)
+        : await widget.storage.loadHistory();
     HistoryEntry? draftEntry;
     if (widget.groupIdFilter == null) {
       draftEntry = await widget.storage.loadActiveDraftEntry();

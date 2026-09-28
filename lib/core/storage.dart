@@ -434,6 +434,49 @@ class StorageService {
     }
     history.sort((a, b) => b.savedAt.compareTo(a.savedAt));
     await saveHistory(history);
+    if (entry.groupId != null) {
+      await _registerHistoryOnGroup(entry.groupId!, entry);
+    }
+  }
+
+  Future<void> _registerHistoryOnGroup(
+    String groupId,
+    HistoryEntry entry,
+  ) async {
+    final groups = await loadGroups();
+    final index = groups.indexWhere((group) => group.id == groupId);
+    if (index < 0) return;
+
+    final group = groups[index];
+    final ids = List<String>.from(group.historyEntryIds);
+    if (!ids.contains(entry.id)) {
+      ids.insert(0, entry.id);
+    } else {
+      ids.remove(entry.id);
+      ids.insert(0, entry.id);
+    }
+
+    groups[index] = group.copyWith(
+      historyEntryIds: ids,
+      updatedAt: DateTime.now(),
+    );
+    await saveGroups(groups);
+  }
+
+  Future<void> _unregisterHistoryOnGroup(String groupId, String entryId) async {
+    final groups = await loadGroups();
+    final index = groups.indexWhere((group) => group.id == groupId);
+    if (index < 0) return;
+
+    final group = groups[index];
+    final ids = group.historyEntryIds.where((id) => id != entryId).toList();
+    if (ids.length == group.historyEntryIds.length) return;
+
+    groups[index] = group.copyWith(
+      historyEntryIds: ids,
+      updatedAt: DateTime.now(),
+    );
+    await saveGroups(groups);
   }
 
   Future<HistoryEntry?> loadActiveDraftEntry() async {
@@ -471,8 +514,15 @@ class StorageService {
 
   Future<void> deleteFromHistory(String id) async {
     final history = await loadHistory();
+    final removed =
+        history.where((entry) => entry.id == id).toList(growable: false);
     history.removeWhere((entry) => entry.id == id);
     await saveHistory(history);
+    for (final entry in removed) {
+      if (entry.groupId != null) {
+        await _unregisterHistoryOnGroup(entry.groupId!, entry.id);
+      }
+    }
   }
 
   Future<String> loadPersistentHeader() async {
@@ -612,7 +662,45 @@ class StorageService {
 
   Future<List<HistoryEntry>> loadGroupHistory(String groupId) async {
     final all = await loadHistory();
-    return all.where((e) => e.groupId == groupId).toList();
+    final byGroupId =
+        all.where((entry) => entry.groupId == groupId).toList();
+    final groups = await loadGroups();
+    CalculationGroup? group;
+    for (final item in groups) {
+      if (item.id == groupId) {
+        group = item;
+        break;
+      }
+    }
+    if (group == null) {
+      byGroupId.sort((a, b) => b.savedAt.compareTo(a.savedAt));
+      return byGroupId;
+    }
+
+    final byId = {for (final entry in all) entry.id: entry};
+    final merged = <String, HistoryEntry>{};
+    for (final entry in byGroupId) {
+      merged[entry.id] = entry;
+    }
+    for (final entryId in group.historyEntryIds) {
+      final entry = byId[entryId];
+      if (entry != null) {
+        merged[entry.id] = entry.copyWith(groupId: groupId);
+      }
+    }
+
+    final entries = merged.values.toList()
+      ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
+
+    if (group.historyEntryIds.isEmpty && entries.isNotEmpty) {
+      await upsertGroup(
+        group.copyWith(
+          historyEntryIds: entries.map((entry) => entry.id).toList(),
+        ),
+      );
+    }
+
+    return entries;
   }
 
   Future<void> migrateLegacyToDefaultGroup() async {
@@ -659,6 +747,15 @@ class StorageService {
     }
     if (migrated) {
       await saveHistory(history);
+    }
+
+    final groupHistory = await loadGroupHistory(group.id);
+    if (groupHistory.isNotEmpty) {
+      await upsertGroup(
+        group.copyWith(
+          historyEntryIds: groupHistory.map((entry) => entry.id).toList(),
+        ),
+      );
     }
   }
 }

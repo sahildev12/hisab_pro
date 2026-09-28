@@ -16,6 +16,7 @@ class GroupStaticRowTable extends StatelessWidget {
     required this.onAddRow,
     required this.onAddCustomEntry,
     this.onReset,
+    this.onResetDigits,
     this.errorRowIndex,
     this.canAddRow = true,
   });
@@ -26,6 +27,7 @@ class GroupStaticRowTable extends StatelessWidget {
   final VoidCallback onAddRow;
   final VoidCallback onAddCustomEntry;
   final VoidCallback? onReset;
+  final VoidCallback? onResetDigits;
   final int? errorRowIndex;
   final bool canAddRow;
 
@@ -41,52 +43,84 @@ class GroupStaticRowTable extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Entries',
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primaryText,
-                  ),
-                ),
-                const Spacer(),
-                if (onReset != null) ...[
-                  OutlinedButton(
-                    onPressed: onReset,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.secondaryText,
-                      backgroundColor: AppColors.surface,
-                      side: const BorderSide(color: AppColors.border),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      minimumSize: const Size(0, 32),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                Row(
+                  children: [
+                    Text(
+                      'Entries',
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryText,
                       ),
                     ),
-                    child: Text(
-                      'Reset',
+                    const Spacer(),
+                    Text(
+                      '$_activeCount rows',
                       style: GoogleFonts.inter(
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        color: AppColors.secondaryText,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                Text(
-                  '$_activeCount rows',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: AppColors.secondaryText,
-                  ),
+                  ],
                 ),
+                if (onResetDigits != null || onReset != null) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (onResetDigits != null)
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onResetDigits,
+                            icon: const Icon(
+                              Icons.pin_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Reset Digits'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.primaryBlue,
+                              minimumSize: const Size(0, 40),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              textStyle: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (onResetDigits != null && onReset != null)
+                        const SizedBox(width: 8),
+                      if (onReset != null)
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onReset,
+                            icon: const Icon(
+                              Icons.restart_alt_rounded,
+                              size: 18,
+                            ),
+                            label: const Text('Reset All'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.secondaryText,
+                              minimumSize: const Size(0, 40),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              textStyle: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -263,8 +297,12 @@ class _StaticRowEntryState extends State<_StaticRowEntry> {
   @override
   void didUpdateWidget(covariant _StaticRowEntry oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.row.id != widget.row.id) {
+    if (oldWidget.row.id != widget.row.id ||
+        oldWidget.row.amount != widget.row.amount) {
       _sync(_amountController, widget.row.amount);
+    }
+    if (oldWidget.row.id != widget.row.id ||
+        oldWidget.row.bracket != widget.row.bracket) {
       _sync(_bracketController, widget.row.bracket);
     }
   }

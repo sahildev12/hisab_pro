@@ -3,29 +3,33 @@ import 'dart:math' as math;
 import 'package:decimal/decimal.dart';
 
 import '../models/calculation_result.dart';
+import '../models/result_type.dart';
 import '../models/row_data.dart';
 import 'format.dart';
 import 'parse_number.dart' show tryParseDecimal;
 import 'validate.dart';
 
-/// Column width for summary labels (fits COMMISSION + 1 space).
-const _summaryLabelWidth = 11;
-
-String _label(String text) => text.padRight(_summaryLabelWidth);
-
 String _bold(String text) => '*$text*';
 
-String _boldSummaryLine(String label, String value) {
-  if (label.isEmpty) {
-    return _bold(value);
+String _upper(String text) => text.toUpperCase();
+
+/// Copy label without trailing dot: `Sb.` → `SB`.
+String _formatCopyName(String name) {
+  final upper = _upper(name.trim());
+  if (upper.endsWith('.')) {
+    return upper.substring(0, upper.length - 1);
   }
-  return _bold('${_label(label)}$value');
+  return upper;
 }
 
-/// Fixed column layout for paste copy rows: `Sb.    4151    ( 35 )`.
-const _pasteNameColumnWidth = 7;
-const _pasteAmountColumnWidth = 5;
-const _pasteBracketColumnStart = 16;
+bool _shouldShowBracket(String bracket) {
+  if (bracket.isEmpty) return false;
+  final parsed = tryParseDecimal(bracket);
+  return parsed != null && parsed != Decimal.zero;
+}
+
+String _labelValueLine(String label, String value) =>
+    '${_bold(_upper(label))} $value';
 
 String buildCopyMessage({
   required String title,
@@ -33,63 +37,31 @@ String buildCopyMessage({
   required CalculationResult result,
   String persistentHeader = '',
 }) {
-  final buffer = StringBuffer();
-  final trimmedHeader = persistentHeader.trim();
-  final trimmedTitle = title.trim().isEmpty ? 'Calculation' : title.trim();
-
-  if (trimmedHeader.isNotEmpty) {
-    buffer.writeln(trimmedHeader);
-    buffer.writeln();
-  }
-
-  buffer.writeln(trimmedTitle);
-  buffer.writeln();
-
-  _writeFormattedRows(buffer, rows);
-
-  buffer.writeln();
-  if (result.commissionTracking) {
-    buffer.writeln(
-      '${_label('TOTAL')}${formatPlainNumber(result.totalAmount)}',
-    );
-  } else {
-    buffer.writeln(
-      '${_label('TOTAL')}'
-      '${formatPlainNumber(result.totalAmount)} - '
-      '${formatPlainNumber(result.commissionEarned)} = '
-      '${formatPlainNumber(result.netTotalAmount)}',
-    );
-  }
-  buffer.writeln();
-  buffer.writeln(
-    '${_label('PASSING')}'
-    '${formatPlainNumber(result.totalBracket)} × '
-    '${formatPlainNumber(result.passingRate)} = '
-    '${formatMoney(result.passing, showCurrency: false)}',
+  return buildWhatsAppCopyMessage(
+    title: title,
+    rows: rows,
+    result: result,
+    persistentHeader: persistentHeader,
   );
-  buffer.writeln();
-  buffer.writeln(
-    '${formatMoney(result.netTotalAmount, showCurrency: false)} - '
-    '${formatMoney(result.passing, showCurrency: false)} = '
-    '${formatMoney(result.displayAmount, showCurrency: false)} '
-    '${result.resultType.displayLabel.toLowerCase()}.',
-  );
-
-  if (result.commissionTracking && result.commissionEarned > Decimal.zero) {
-    buffer.writeln();
-    buffer.writeln(
-      '${_label('COMMISSION')}'
-      '${formatMoney(result.commissionEarned, showCurrency: false)}',
-    );
-  }
-
-  return buffer.toString().trimRight();
 }
 
-/// WhatsApp-style copy text for the paste calculation screen.
-///
-/// Row brackets use spaced parentheses: `Sb.  4151  ( 35 )`.
+/// WhatsApp-style copy/share text for group session and paste calculation.
 String buildPasteCopyMessage({
+  required String title,
+  required List<RowData> rows,
+  required CalculationResult result,
+  String persistentHeader = '',
+}) {
+  return buildWhatsAppCopyMessage(
+    title: title,
+    rows: rows,
+    result: result,
+    persistentHeader: persistentHeader,
+  );
+}
+
+/// WhatsApp share format — bold date/title, aligned rows, compact totals.
+String buildWhatsAppCopyMessage({
   required String title,
   required List<RowData> rows,
   required CalculationResult result,
@@ -97,62 +69,147 @@ String buildPasteCopyMessage({
 }) {
   final buffer = StringBuffer();
   final trimmedHeader = persistentHeader.trim();
-  final trimmedTitle = title.trim().isEmpty ? 'Calculation' : title.trim();
+  final trimmedTitle =
+      title.trim().isEmpty ? 'CALCULATION' : _upper(title.trim());
 
   if (trimmedHeader.isNotEmpty) {
-    buffer.writeln(trimmedHeader);
+    buffer.writeln(_bold(trimmedHeader));
     buffer.writeln();
   }
 
-  buffer.writeln(trimmedTitle);
+  buffer.writeln(_bold(trimmedTitle));
   buffer.writeln();
 
-  _writePasteFormattedRows(buffer, rows);
+  _writeFormattedRows(buffer, rows);
 
   buffer.writeln();
   if (result.commissionTracking) {
     buffer.writeln(
-      _boldSummaryLine('TOTAL', formatPlainNumber(result.totalAmount)),
+      _labelValueLine('TOTAL', formatPlainNumber(result.totalAmount)),
     );
   } else {
     buffer.writeln(
-      _boldSummaryLine(
+      _labelValueLine(
         'TOTAL',
-        '${formatPlainNumber(result.totalAmount)} - '
-        '${formatPlainNumber(result.commissionEarned)} = '
+        '${formatPlainNumber(result.totalAmount)}-'
+        '${formatPlainNumber(result.commissionEarned)}='
         '${formatPlainNumber(result.netTotalAmount)}',
       ),
     );
   }
   buffer.writeln();
   buffer.writeln(
-    _boldSummaryLine(
+    _labelValueLine(
       'PASSING',
-      '${formatPlainNumber(result.totalBracket)} × '
-      '${formatPlainNumber(result.passingRate)} = '
+      '${formatPlainNumber(result.totalBracket)}×'
+      '${formatPlainNumber(result.passingRate)}='
       '${formatPlainNumber(result.passing)}',
     ),
   );
   buffer.writeln();
   buffer.writeln(
-    _boldSummaryLine(
-      '',
-      '${formatPlainNumber(result.netTotalAmount)} - '
-      '${formatPlainNumber(result.passing)} = '
+    _bold(
+      '${formatPlainNumber(result.passing)}-'
+      '${formatPlainNumber(result.netTotalAmount)}='
       '${formatPlainNumber(result.displayAmount)} '
-      '${result.resultType.displayLabel.toLowerCase()}.',
+      '${_upper(_resultSuffix(result.resultType))}',
     ),
   );
 
   if (result.commissionTracking && result.commissionEarned > Decimal.zero) {
     buffer.writeln();
     buffer.writeln(
-      '${_label('COMMISSION')}'
-      '${formatMoney(result.commissionEarned, showCurrency: false)}',
+      _labelValueLine(
+        'COMMISSION',
+        formatPlainNumber(result.commissionEarned),
+      ),
     );
   }
 
   return buffer.toString().trimRight();
+}
+
+@Deprecated('Use buildWhatsAppCopyMessage')
+String buildWebCopyMessage({
+  required String title,
+  required List<RowData> rows,
+  required CalculationResult result,
+  String persistentHeader = '',
+}) {
+  return buildWhatsAppCopyMessage(
+    title: title,
+    rows: rows,
+    result: result,
+    persistentHeader: persistentHeader,
+  );
+}
+
+String _resultSuffix(ResultType type) {
+  switch (type) {
+    case ResultType.lene:
+      return 'lene aaj ke';
+    case ResultType.dene:
+      return 'dene aaj ke';
+    case ResultType.balanced:
+      return 'hisab barabar';
+  }
+}
+
+/// Figure space — same width as digits in most fonts (helps WhatsApp alignment).
+const _figSpace = '\u2007';
+
+const _minNameColumnWidth = 8;
+const _minAmountColumnWidth = 4;
+const _minGapBeforeBracket = 3;
+
+String _figGap(int count) {
+  if (count <= 0) return '';
+  return _figSpace * count;
+}
+
+void _writeFormattedRows(StringBuffer buffer, List<RowData> rows) {
+  final activeRows = _copyableRows(rows);
+  if (activeRows.isEmpty) return;
+
+  final names = activeRows
+      .map((row) => _formatCopyName(row.name))
+      .toList(growable: false);
+  final longestName =
+      names.map((name) => name.length).fold<int>(0, math.max);
+  final amountStartColumn = math.max(
+    _minNameColumnWidth,
+    longestName + 1,
+  );
+  final amountFieldWidth = math.max(
+    _minAmountColumnWidth,
+    activeRows
+        .map((row) => _displayCell(row.amount).length)
+        .fold<int>(0, math.max),
+  );
+  final anyBracket = activeRows.any(
+    (row) => _shouldShowBracket(_displayCell(row.bracket)),
+  );
+  final bracketOpenColumn = anyBracket
+      ? amountStartColumn + amountFieldWidth + _minGapBeforeBracket
+      : 0;
+
+  for (var i = 0; i < activeRows.length; i++) {
+    final name = names[i];
+    final amount = _displayCell(activeRows[i].amount);
+    final bracket = _displayCell(activeRows[i].bracket);
+    final namePrefix = name.length >= amountStartColumn
+        ? '$name '
+        : name.padRight(amountStartColumn);
+    if (!_shouldShowBracket(bracket)) {
+      buffer.writeln('$namePrefix$amount');
+      continue;
+    }
+    final gapBeforeBracket =
+        bracketOpenColumn - namePrefix.length - amount.length;
+    buffer.writeln(
+      '$namePrefix$amount${_figGap(gapBeforeBracket)}($bracket)',
+    );
+  }
 }
 
 bool _rowHasCopyableNumbers(RowData row) {
@@ -165,56 +222,10 @@ List<RowData> _copyableRows(List<RowData> rows) {
   return rows.where(_rowHasCopyableNumbers).toList();
 }
 
-/// Renders a cell, leaving it blank when the value is missing or unparseable.
-String _cell(String raw) {
-  final parsed = tryParseDecimal(raw);
-  return parsed == null ? '' : formatPlainNumber(parsed);
-}
-
-void _writePasteFormattedRows(StringBuffer buffer, List<RowData> rows) {
-  final activeRows = _copyableRows(rows);
-  if (activeRows.isEmpty) return;
-
-  final bracketWidth = activeRows
-      .map((row) => _cell(row.bracket).length)
-      .fold<int>(0, math.max);
-
-  for (final row in activeRows) {
-    final name = row.name.trim().padRight(_pasteNameColumnWidth);
-    final amount = _cell(row.amount).padLeft(_pasteAmountColumnWidth);
-    final bracket = _cell(row.bracket).padLeft(bracketWidth);
-    final prefix = '$name$amount';
-    final gap = math.max(1, _pasteBracketColumnStart - prefix.length);
-    buffer.writeln('$prefix${' ' * gap}( $bracket )');
-  }
-}
-
-void _writeFormattedRows(
-  StringBuffer buffer,
-  List<RowData> rows, {
-  bool spacedBrackets = false,
-}) {
-  final activeRows = _copyableRows(rows);
-  if (activeRows.isEmpty) return;
-
-  final nameWidth = activeRows
-      .map((row) => row.name.trim().length)
-      .fold<int>(0, math.max);
-  final amountWidth = activeRows
-      .map((row) => _cell(row.amount).length)
-      .fold<int>(0, math.max);
-  final bracketWidth = activeRows
-      .map((row) => _cell(row.bracket).length)
-      .fold<int>(0, math.max);
-
-  for (final row in activeRows) {
-    final name = row.name.trim().padRight(nameWidth);
-    final amount = _cell(row.amount).padLeft(amountWidth);
-    final bracket = _cell(row.bracket).padLeft(bracketWidth);
-    if (spacedBrackets) {
-      buffer.writeln('$name  $amount  ( $bracket )');
-    } else {
-      buffer.writeln('$name  $amount  ($bracket)');
-    }
-  }
+/// Copy text for a cell — keeps user typing such as leading zeros (`06`).
+String _displayCell(String raw) {
+  final cleaned = raw.replaceAll(',', '').trim();
+  if (cleaned.isEmpty) return '';
+  if (tryParseDecimal(cleaned) == null) return '';
+  return cleaned;
 }

@@ -173,6 +173,64 @@ class GroupEntriesFooter extends StatelessWidget {
   }
 }
 
+/// Entry rows in the parent [CustomScrollView] — long-press a row, then drag.
+class GroupEntriesSliver extends StatelessWidget {
+  const GroupEntriesSliver({
+    super.key,
+    required this.rows,
+    required this.errorRowIndex,
+    required this.onChanged,
+    required this.onDelete,
+    required this.onReorderItem,
+  });
+
+  final List<RowData> rows;
+  final int? errorRowIndex;
+  final void Function(int index, RowData row) onChanged;
+  final ValueChanged<String> onDelete;
+  final void Function(int oldIndex, int newIndex) onReorderItem;
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverReorderableList(
+      itemCount: rows.length,
+      onReorderItem: onReorderItem,
+      onReorderStart: (_) => HapticFeedback.mediumImpact(),
+      proxyDecorator: (child, index, animation) {
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final t = Curves.easeInOut.transform(animation.value);
+            return Material(
+              elevation: 4 * t,
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              child: child,
+            );
+          },
+          child: child,
+        );
+      },
+      itemBuilder: (context, index) {
+        final row = rows[index];
+        return ReorderableDelayedDragStartListener(
+          key: ValueKey(row.id),
+          index: index,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: GroupEntryRow(
+              row: row,
+              hasError: errorRowIndex == index,
+              onChanged: (updated) => onChanged(index, updated),
+              onDelete: () => onDelete(row.id),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class GroupEntryRow extends StatefulWidget {
   const GroupEntryRow({
     super.key,
@@ -180,16 +238,12 @@ class GroupEntryRow extends StatefulWidget {
     required this.hasError,
     required this.onChanged,
     required this.onDelete,
-    this.onMoveUp,
-    this.onMoveDown,
   });
 
   final RowData row;
   final bool hasError;
   final void Function(RowData row) onChanged;
   final VoidCallback onDelete;
-  final VoidCallback? onMoveUp;
-  final VoidCallback? onMoveDown;
 
   @override
   State<GroupEntryRow> createState() => _GroupEntryRowState();
@@ -290,29 +344,6 @@ class _GroupEntryRowState extends State<GroupEntryRow> {
     );
   }
 
-  Widget _moveButton({
-    required IconData icon,
-    required VoidCallback? onPressed,
-    required String tooltip,
-  }) {
-    return SizedBox(
-      width: 30,
-      height: 24,
-      child: IconButton(
-        onPressed: onPressed,
-        tooltip: tooltip,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 30, minHeight: 24),
-        visualDensity: VisualDensity.compact,
-        icon: Icon(
-          icon,
-          size: 18,
-          color: onPressed != null ? AppColors.secondaryText : AppColors.stone,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -347,22 +378,6 @@ class _GroupEntryRowState extends State<GroupEntryRow> {
               decoration: _cellDecoration(),
             ),
           ),
-          const SizedBox(width: 4),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _moveButton(
-                icon: Icons.keyboard_arrow_up_rounded,
-                onPressed: widget.onMoveUp,
-                tooltip: 'Move up',
-              ),
-              _moveButton(
-                icon: Icons.keyboard_arrow_down_rounded,
-                onPressed: widget.onMoveDown,
-                tooltip: 'Move down',
-              ),
-            ],
-          ),
           SizedBox(
             width: 36,
             child: IconButton(
@@ -395,7 +410,6 @@ class _TableHeader extends StatelessWidget {
           Expanded(flex: 4, child: _HeaderLabel('Amount')),
           SizedBox(width: 8),
           Expanded(flex: 3, child: _HeaderLabel('Bracket')),
-          SizedBox(width: 34),
           SizedBox(width: 36),
         ],
       ),

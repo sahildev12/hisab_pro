@@ -51,10 +51,10 @@ ValidationResult validateRows(
     final hasAmount = row.amount.trim().isNotEmpty;
     final hasBracket = row.bracket.trim().isNotEmpty;
 
-    if (!hasAmount || !hasBracket) {
+    if (!hasAmount) {
       return ValidationResult(
         isValid: false,
-        errorMessage: 'Row ${i + 1}: Amount and bracket are required',
+        errorMessage: 'Row ${i + 1}: Amount is required',
         rowIndex: i,
       );
     }
@@ -75,7 +75,7 @@ ValidationResult validateRows(
       );
     }
 
-    if (!isValidNumber(row.bracket)) {
+    if (hasBracket && !isValidNumber(row.bracket)) {
       return ValidationResult(
         isValid: false,
         errorMessage: 'Row ${i + 1}: Enter a valid bracket.',

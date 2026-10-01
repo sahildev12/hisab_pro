@@ -258,17 +258,15 @@ class SmartTextParser {
     if (numericTokens.isEmpty) {
       return (row: null, error: 'Amount is invalid for $entryLabel.');
     }
-    if (numericTokens.length < 2) {
-      final name = _extractEntryName(line, numericTokens);
-      final label = name ?? entryLabel;
-      return (
-        row: null,
-        error: 'Bracket / passing value is missing for $label.',
-      );
+    final amountRaw = numericTokens[0];
+    var bracketRaw = numericTokens.length >= 2 ? numericTokens[1] : '';
+    if (bracketRaw.isNotEmpty) {
+      final bracketValue = tryParseDecimal(bracketRaw);
+      if (bracketValue != null && bracketValue == Decimal.zero) {
+        bracketRaw = '';
+      }
     }
 
-    final amountRaw = numericTokens[0];
-    final bracketRaw = numericTokens[1];
     final nameRaw = _extractEntryName(line, numericTokens);
     if (nameRaw == null || nameRaw.isEmpty) {
       return (row: null, error: 'Entry name is missing.');
@@ -286,7 +284,7 @@ class SmartTextParser {
       return (row: null, error: 'Amount is invalid for $name.');
     }
 
-    if (tryParseDecimal(bracketRaw) == null) {
+    if (bracketRaw.isNotEmpty && tryParseDecimal(bracketRaw) == null) {
       return (
         row: null,
         error: 'Bracket / passing value is invalid for $name.',

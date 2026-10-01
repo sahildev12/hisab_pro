@@ -668,29 +668,23 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
     await _saveDraft();
   }
 
-  void _moveRow(int fromIndex, int toIndex) {
-    if (fromIndex == toIndex) return;
-    if (fromIndex < 0 ||
-        toIndex < 0 ||
-        fromIndex >= _rows.length ||
-        toIndex >= _rows.length) {
+  void _onReorderRows(int oldIndex, int newIndex) {
+    if (oldIndex == newIndex) return;
+    if (oldIndex < 0 ||
+        newIndex < 0 ||
+        oldIndex >= _rows.length ||
+        newIndex >= _rows.length) {
       return;
     }
     _pushUndoSnapshot();
     setState(() {
-      final row = _rows.removeAt(fromIndex);
-      _rows.insert(toIndex, row);
+      final row = _rows.removeAt(oldIndex);
+      _rows.insert(newIndex, row);
       _errorMessage = null;
       _errorRowIndex = null;
       _markRowsChanged();
     });
     _scheduleDraftSave();
-  }
-
-  void _moveRowById(String rowId, int direction) {
-    final index = _rows.indexWhere((row) => row.id == rowId);
-    if (index < 0) return;
-    _moveRow(index, index + direction);
   }
 
   Future<void> _resetDigits() async {
@@ -1068,15 +1062,12 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
                 AppSpacing.pagePadding,
                 0,
               ),
-              sliver: SliverToBoxAdapter(
-                child: Container(
-                  width: double.infinity,
-                  decoration: surfaceDecoration(context),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
+              sliver: DecoratedSliver(
+                decoration: surfaceDecoration(context),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                         child: GroupEntriesHeader(
                           rows: _rows,
@@ -1084,27 +1075,16 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
                           onResetDigits: _resetDigits,
                         ),
                       ),
-                      ...List.generate(_rows.length, (index) {
-                        final row = _rows[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: GroupEntryRow(
-                            key: ValueKey(row.id),
-                            row: row,
-                            hasError: _errorRowIndex == index,
-                            onChanged: (updated) =>
-                                _onRowChanged(index, updated),
-                            onDelete: () => _deleteRowById(row.id),
-                            onMoveUp: index > 0
-                                ? () => _moveRowById(row.id, -1)
-                                : null,
-                            onMoveDown: index < _rows.length - 1
-                                ? () => _moveRowById(row.id, 1)
-                                : null,
-                          ),
-                        );
-                      }),
-                      Padding(
+                    ),
+                    GroupEntriesSliver(
+                      rows: _rows,
+                      errorRowIndex: _errorRowIndex,
+                      onChanged: _onRowChanged,
+                      onDelete: _deleteRowById,
+                      onReorderItem: _onReorderRows,
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                         child: GroupEntriesFooter(
                           onAddRow: _addRow,
@@ -1112,8 +1092,8 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
                           canAddRow: canAddRow,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

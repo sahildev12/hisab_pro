@@ -2,65 +2,124 @@
 
 Fast, accurate calculation app for amounts and brackets — built with Flutter.
 
-**Tagline:** Fast • Accurate • Always Yours
+**Tagline:** Fast • Accurate • Always Yours  
+**Version:** 1.1.5+7  
+**Repository:** [github.com/sahildev12/hisab_pro](https://github.com/sahildev12/hisab_pro)  
+**Active branch:** `athen`
 
 ## Features
 
-- Dynamic row table (Name, Amount, Bracket)
-- Decimal-safe calculations using `decimal` package
+- **Calculation groups** — organize work by client/day with saved entry names and rates
+- **My Calculation** — manual row table (Name, Amount, Bracket) with drag-to-reorder
+- **Paste Calculation** — parse WhatsApp-style pasted messages and calculate instantly
+- **Commission tracking** — optional per-group commission balance
+- **History** — saved results with copy/share in WhatsApp format
+- Decimal-safe math via the `decimal` package
 - Indian currency formatting (₹)
-- WhatsApp-style copy message
-- Local persistence (survives refresh)
-- Mobile-first responsive UI
+- Local persistence (groups, drafts, settings survive app restart)
+- Android app + web deploy
 
 ## Calculation Logic
 
 ```
-TOTAL AMOUNT = SUM(all Amount values)
-TOTAL BRACKET = SUM(all Bracket values)
-PASSING = TOTAL BRACKET × 96
-LENE AAJ = TOTAL AMOUNT − PASSING
+TOTAL AMOUNT   = SUM(all Amount values)
+TOTAL BRACKET  = SUM(all Bracket values)   // empty / 0 brackets are skipped
+PASSING        = TOTAL BRACKET × passing rate (e.g. 96)
+NET TOTAL      = TOTAL AMOUNT − commission (when daily deduction is on)
+LENE / DENE    = PASSING − NET TOTAL
+```
+
+Copy/share format uses uppercase labels, no dots after entry codes (`GW` not `GW.`), and omits brackets when empty or zero.
+
+## Requirements
+
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart ^3.12)
+- Android SDK for APK builds
+- Chrome for local web testing
+
+## Setup
+
+```bash
+git clone https://github.com/sahildev12/hisab_pro.git
+cd hisab_pro
+flutter pub get
 ```
 
 ## Run Locally
 
 ```bash
-cd C:\xampp\htdocs\hisab_pro
-flutter pub get
+# Web (Chrome)
 flutter run -d chrome
+
+# Android (device or emulator)
+flutter run
 ```
 
-## Run Tests
+## Tests
 
 ```bash
 flutter test
+flutter analyze
 ```
 
-## Build for Web (XAMPP)
+## Build Android APK
 
 ```bash
-flutter build web --base-href /hisab_pro/
+flutter build apk --release
 ```
 
-Copy the contents of `build/web/` into your XAMPP `htdocs/hisab_pro/` folder, then open:
+Output: `build/app/outputs/flutter-apk/app-release.apk`
 
-```
-http://localhost/hisab_pro/
+For a named copy in the project:
+
+```powershell
+New-Item -ItemType Directory -Path release -Force
+Copy-Item build\app\outputs\flutter-apk\app-release.apk release\hisabpro-release.apk
 ```
 
-## Build for Android
+APK files are **not** committed to git — build and share them separately.
 
-```bash
-flutter build apk
+## Build Web Deploy
+
+Use the PowerShell script (updates `assets/version.json`, cache-busts JS, creates zip):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_web_zip.ps1
 ```
+
+Outputs:
+
+| File / folder | Purpose |
+|---|---|
+| `build/web/` | Raw Flutter web build |
+| `UPLOAD-TO-WEBSITE/` | Ready-to-upload folder (with `.htaccess`) |
+| `hisabpro-web-deploy.zip` | Zip for server upload |
+
+Upload zip contents to site root (e.g. `https://hisabpro.dise.org.in/`).  
+See [WEB_DEPLOY.md](WEB_DEPLOY.md) for full deploy steps.
 
 ## Project Structure
 
 ```
 lib/
-  core/          # calculate, validate, format, copy_message, storage
-  models/        # RowData, CalculationResult
-  screens/       # MainScreen, ResultsScreen
-  widgets/       # Header, RowTable, ActionBar, ResultCard, CopyButton
-  theme/         # App theme and colors
+  core/          calculate, validate, smart_text_parser, copy_message, storage
+  models/        RowData, CalculationResult, CalculationGroup, HistoryEntry
+  screens/       groups, group session, paste calculator, settings, history
+  widgets/       row tables, result cards, modals, branding
+  theme/         App theme and colors
+assets/          logos, app icon, version.json
+scripts/         build_web_zip.ps1, build_maintenance_zip.ps1
+test/            calculate, parser, widget tests
+web/             index.html, icons, .htaccess
+android/         Android project (primary mobile target)
 ```
+
+## Git Notes
+
+- **Do not commit:** `build/`, `.dart_tool/`, `release/*.apk`, deploy zips, `UPLOAD-TO-WEBSITE/`
+- **Source of truth for logos:** `assets/logo/` (not the old `logos/` folder)
+- iOS platform folder is not maintained in this branch (Android + web only)
+
+## License
+
+Private project — not published to pub.dev.

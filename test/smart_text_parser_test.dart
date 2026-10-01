@@ -97,6 +97,37 @@ Gl.  905  ( 6 )
     expect(output.result!.rows.length, 5);
   });
 
+  test('parses amount-only entry lines without brackets', () {
+    const names = ['Gw.', 'Dm.', 'Db.', 'Sg.'];
+    final output = SmartTextParser.parse(
+      '''
+MY CALCULATIONS 96%4
+GW 4888 (794)
+DM 596 (49)
+DB 5997
+SG 4694
+''',
+      allowedEntryNames: names,
+    );
+
+    expect(output.errors, isEmpty);
+    expect(output.result!.rows.length, 4);
+
+    final db = output.result!.rows.firstWhere((r) => r.name == 'Db.');
+    expect(db.amount, '5997');
+    expect(db.bracket, '');
+
+    final validation = validateRows(output.result!.rows, allowedNames: names);
+    expect(validation.isValid, isTrue);
+
+    final result = calculateSettlement(
+      output.result!.rows,
+      passingRate: Decimal.fromInt(96),
+      amountDeductionRate: Decimal.fromInt(4),
+    );
+    expect(result.totalAmount, Decimal.fromInt(5997 + 4694 + 4888 + 596));
+  });
+
   test('reports error for invalid entry line', () {
     final output = SmartTextParser.parse(
       'Test 96%4\nSb. abc (30)',

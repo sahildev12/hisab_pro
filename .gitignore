@@ -11,52 +11,64 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+Thumbs.db
 
-# IntelliJ related
+# IntelliJ / Android Studio
 *.iml
 *.ipr
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# VS Code (local editor settings)
+.vscode/
 
-# Flutter/Dart/Pub related
+# Flutter / Dart / Pub
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
 
-# Symbolication related
-app.*.symbols
+# Platform ephemeral / generated
+**/Flutter/ephemeral/
+**/GeneratedPluginRegistrant.*
+linux/flutter/generated_plugin_registrant.*
+windows/flutter/generated_plugin_registrant.*
+macos/Flutter/ephemeral/
 
-# Obfuscation related
+# Symbolication / obfuscation
+app.*.symbols
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# Android build outputs
 /android/app/debug
 /android/app/profile
 /android/app/release
 
-# Release APKs (share separately, not in git)
+# Release & deploy artifacts (build locally, share separately)
+/release/
 *.apk
-
-# Web deploy outputs (regenerate with scripts/)
+*.aab
+hisabpro-*-deploy.zip
 UPLOAD-TO-WEBSITE/
 UPLOAD-MAINTENANCE/
 upload this on the server*/
 web_dist/
 hisabpro-maintenance-deploy/
-hisabpro-*-deploy.zip
-ZZZZ*/
-BKPhisab_pro.zip
 website/server_website/
 website/downloads/
 website/OFF Mentaincace.zip
+BKPhisab_pro.zip
+ZZZZ*/
 
+# Local scratch / duplicate assets (not used by the app)
+WhatsApp*.jpeg
+WhatsApp*.jpg
+mobile-logo.png
+project.txt
+WHICH-APK.txt
+/logos/

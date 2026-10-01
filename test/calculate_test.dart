@@ -140,9 +140,9 @@ void main() {
       result: result,
     );
 
-    expect(message, contains('TOTAL'));
-    expect(message, contains('PASSING'));
-    expect(message, contains('lene aaj'));
+    expect(message, contains('*TOTAL*'));
+    expect(message, contains('*PASSING*'));
+    expect(message, contains('LENE AAJ KE'));
   });
 
   test('copy message includes persistent header when set', () {
@@ -158,7 +158,7 @@ void main() {
       title: 'Sample',
       rows: rows,
       result: result,
-      persistentHeader: '*31-08-2026*',
+      persistentHeader: '31-08-2026',
     );
 
     expect(message.startsWith('*31-08-2026*'), isTrue);
@@ -176,9 +176,9 @@ void main() {
       result: result,
     );
 
-    expect(message, contains('TOTAL      120777 - 4831 = 115946'));
-    expect(message, contains('PASSING    1059.5 × 96 = 1,01,712'));
-    expect(message, contains('1,15,946 - 1,01,712 = 14,234 lene aaj.'));
+    expect(message, contains('*TOTAL* 120777-4831=115946'));
+    expect(message, contains('*PASSING* 1059.5×96=101712'));
+    expect(message, contains('*101712-115946=14234 LENE AAJ KE*'));
   });
 
   test('TEST A — daily commission deducts from total', () {
@@ -246,7 +246,7 @@ void main() {
       result: result,
     );
 
-    expect(message, contains('COMMISSION 1,775'));
+    expect(message, contains('*COMMISSION* 1775'));
   });
 
   test('different calculations keep their own rates', () {
@@ -327,8 +327,161 @@ void main() {
       result: result,
     );
 
-    expect(message, contains('Sb.'));
-    expect(message, contains('Gw.'));
-    expect(message, contains('15000 - 600 = 14400'));
+    expect(message, contains('SB      10000'));
+    expect(message, contains('GW      5000'));
+    expect(message, contains('*TOTAL* 15000-600=14400'));
+  });
+
+  test('whatsapp copy message uses bold date, aligned rows, and compact totals', () {
+    final rows = [
+      RowData(id: '1', name: 'Sb.', amount: '56000', bracket: '89.6'),
+    ];
+    final result = calculateSettlement(
+      rows,
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+    final message = buildWhatsAppCopyMessage(
+      title: 'MODI BHAI 96%4 (RAVI)',
+      rows: rows,
+      result: result,
+      persistentHeader: '29-09-2026',
+    );
+
+    expect(message.startsWith('*29-09-2026*'), isTrue);
+    expect(message, contains('*MODI BHAI 96%4 (RAVI)*'));
+    expect(message, contains('56000'));
+    expect(message, contains('(89.6)'));
+    expect(message, isNot(contains('( 89.6)')));
+    expect(message, contains('*TOTAL* 56000-2240=53760'));
+    expect(message, contains('*PASSING* 89.6×96=8601.6'));
+    expect(message, contains('*8601.6-53760=45158 LENE AAJ KE*'));
+  });
+
+  test('copy message keeps leading zeros and aligns brackets without inner spaces', () {
+    final rows = [
+      RowData(id: '1', name: 'Sb.', amount: '06', bracket: '09'),
+      RowData(id: '2', name: 'Gw.', amount: '2484', bracket: '979'),
+    ];
+    final result = calculateSettlement(
+      rows,
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+    final message = buildWhatsAppCopyMessage(
+      title: 'SANJAY',
+      rows: rows,
+      result: result,
+    );
+
+    expect(message, contains('06'));
+    expect(message, contains('(09)'));
+    expect(message, contains('2484'));
+    expect(message, contains('(979)'));
+    expect(message, isNot(contains('( 09)')));
+    expect(message, isNot(contains('( 979)')));
+
+    final rowLines = message
+        .split('\n')
+        .where((line) => line.contains('(') && line.contains(')'))
+        .toList();
+    final bracketColumns = rowLines.map((line) => line.indexOf('(')).toSet();
+    expect(bracketColumns.length, 1, reason: 'All brackets should align');
+
+    final amountStarts = rowLines
+        .map((line) => line.indexOf(RegExp(r'\d')))
+        .toSet();
+    expect(amountStarts.length, 1, reason: 'All amounts should start together');
+  });
+
+  test('copy message matches reference spacing for mixed amount widths', () {
+    final rows = [
+      RowData(id: '1', name: 'Gw.', amount: '4888', bracket: '794'),
+      RowData(id: '2', name: 'Dm.', amount: '596', bracket: '49'),
+      RowData(id: '3', name: 'Db.', amount: '5997', bracket: '46'),
+    ];
+    final result = calculateSettlement(
+      rows,
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+    final message = buildWhatsAppCopyMessage(
+      title: 'MY CALCULATIONS',
+      rows: rows,
+      result: result,
+      persistentHeader: '29-10-2026',
+    );
+
+    final rowLines = message
+        .split('\n')
+        .where((line) => line.contains('(') && line.contains(')'))
+        .toList();
+    expect(rowLines.length, 3);
+    expect(
+      rowLines.every((line) => line.startsWith(RegExp(r'[A-Z]{2}\s'))),
+      isTrue,
+    );
+
+    const figSpace = '\u2007';
+    expect(rowLines[0], 'GW      4888${figSpace * 3}(794)');
+    expect(rowLines[1], 'DM      596${figSpace * 4}(49)');
+    expect(rowLines[2], 'DB      5997${figSpace * 3}(46)');
+
+    final amountStarts = rowLines
+        .map((line) => line.indexOf(RegExp(r'\d')))
+        .toSet();
+    expect(amountStarts.length, 1);
+  });
+
+  test('copy message aligns amounts for short and long names', () {
+    final rows = [
+      RowData(id: '1', name: 'Sp.', amount: '100', bracket: '10'),
+      RowData(id: '2', name: 'MODI BHAI', amount: '200', bracket: '20'),
+      RowData(id: '3', name: 'A', amount: '300', bracket: '30'),
+    ];
+    final result = calculateSettlement(
+      rows,
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+    final message = buildWhatsAppCopyMessage(
+      title: 'TEST',
+      rows: rows,
+      result: result,
+    );
+
+    final rowLines = message
+        .split('\n')
+        .where((line) => line.contains('(') && line.contains(')'))
+        .toList();
+    final amountStarts = rowLines
+        .map((line) => line.indexOf(RegExp(r'\d')))
+        .toSet();
+    expect(amountStarts.length, 1);
+  });
+
+  test('copy message omits brackets when empty or zero', () {
+    final rows = [
+      RowData(id: '1', name: 'Db.', amount: '5997', bracket: ''),
+      RowData(id: '2', name: 'Sg.', amount: '4694', bracket: '0'),
+      RowData(id: '3', name: 'Gw.', amount: '4888', bracket: '794'),
+    ];
+    final result = calculateSettlement(
+      rows,
+      passingRate: Decimal.parse('96'),
+      amountDeductionRate: Decimal.parse('4'),
+    );
+    final message = buildWhatsAppCopyMessage(
+      title: 'MY CALCULATIONS',
+      rows: rows,
+      result: result,
+    );
+
+    expect(message, contains('DB      5997\n'));
+    expect(message, contains('SG      4694\n'));
+    expect(message, contains('GW      4888'));
+    expect(message, contains('(794)'));
+    expect(message, isNot(contains('()')));
+    expect(message, isNot(contains('(0)')));
   });
 }

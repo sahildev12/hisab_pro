@@ -317,7 +317,9 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
       _commissionTracking =
           _commissionEnabled ? draft.commissionTracking : false;
       _historyEntryId = draft.historyEntryId;
-      _editingHistoryEntryId = draft.historyEntryId;
+      // Restoring a draft is not the same as opening History → Edit; only the
+      // latter should keep rewriting an existing saved record.
+      _editingHistoryEntryId = null;
       _originalPastedText = draft.originalPastedText;
       _changedSinceCalculation = draft.historyEntryId == null;
 
@@ -457,8 +459,9 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
   Future<void> _applyFinalizedResult(CalculationResult result) async {
     if (_editingHistoryEntryId != null) {
       _historyEntryId = _editingHistoryEntryId;
+    } else if (_historyEntryId == null || _changedSinceCalculation) {
+      _historyEntryId = DateTime.now().microsecondsSinceEpoch.toString();
     }
-    _historyEntryId ??= DateTime.now().microsecondsSinceEpoch.toString();
 
     final history = await widget.storage.loadHistory();
     HistoryEntry? existing;
@@ -504,6 +507,9 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
     setState(() {
       _lastSavedHistoryEntryId = _historyEntryId;
       _changedSinceCalculation = false;
+      if (widget.initialHistoryEntry == null) {
+        _editingHistoryEntryId = null;
+      }
     });
   }
 
@@ -594,7 +600,17 @@ class _GroupSessionScreenState extends State<GroupSessionScreen>
   Future<void> _shareResult() async {
     final message = _buildCopyMessageSafe();
     if (message == null) return;
-    await shareOnlyCalculationMessage(message);
+    final copiedFallback = await shareOnlyCalculationMessage(message);
+    if (!mounted) return;
+    if (copiedFallback) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Copied — paste in WhatsApp or any app'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(milliseconds: 2200),
+        ),
+      );
+    }
   }
 
   Future<void> _clearCommission() async {

@@ -436,7 +436,17 @@ class _SmartCalculatorScreenState extends State<SmartCalculatorScreen> {
     final message = _copyMessage;
     if (message == null) return;
 
-    await shareOnlyCalculationMessage(message);
+    final copiedFallback = await shareOnlyCalculationMessage(message);
+    if (!mounted) return;
+    if (copiedFallback) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Copied — paste in WhatsApp or any app'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(milliseconds: 2200),
+        ),
+      );
+    }
   }
 
   Widget _buildCopyShareRow({required bool enabled}) {

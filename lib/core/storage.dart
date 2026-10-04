@@ -424,14 +424,31 @@ class StorageService {
 
     try {
       final list = jsonDecode(raw) as List<dynamic>;
-      final cutoff = DateTime.now().subtract(
-        const Duration(days: historyRetentionDays),
-      );
-      final entries = list
-          .map((item) => HistoryEntry.fromJson(item as Map<String, dynamic>))
-          .where((entry) => entry.savedAt.isAfter(cutoff))
-          .toList()
-        ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
+      final now = DateTime.now();
+      final cutoffDay = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).subtract(const Duration(days: historyRetentionDays));
+
+      final entries = <HistoryEntry>[];
+      for (final item in list) {
+        if (item is! Map<String, dynamic>) continue;
+        try {
+          final entry = HistoryEntry.fromJson(item);
+          final savedDay = DateTime(
+            entry.savedAt.year,
+            entry.savedAt.month,
+            entry.savedAt.day,
+          );
+          if (!savedDay.isBefore(cutoffDay)) {
+            entries.add(entry);
+          }
+        } catch (_) {
+          // Skip corrupt rows; never wipe the whole history blob.
+        }
+      }
+      entries.sort((a, b) => b.savedAt.compareTo(a.savedAt));
 
       if (entries.length != list.length) {
         await saveHistory(entries);

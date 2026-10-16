@@ -72,3 +72,6 @@ mobile-logo.png
 project.txt
 WHICH-APK.txt
 /logos/
+
+# Local full-project backups (large zips)
+/backups/

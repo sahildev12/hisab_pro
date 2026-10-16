@@ -98,6 +98,10 @@ Outputs:
 Upload zip contents to site root (e.g. `https://hisabpro.dise.org.in/`).  
 See [WEB_DEPLOY.md](WEB_DEPLOY.md) for full deploy steps.
 
+## Bet message parsing (WhatsApp)
+
+Team rules for **single pricing (1–100)**, **joda cut**, and **crossing** live in [MESSAGE-LOGIC.md](MESSAGE-LOGIC.md). Use that file when adding or testing message parsers (not part of current HisabPro calculation UI yet).
+
 ## Project Structure
 
 ```
